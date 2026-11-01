@@ -1,0 +1,26 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <permission
+        android:name="org.example.securitylab.owner.permission.READ_SECURE"
+        android:protectionLevel="signature" />
+    <application android:label="SecurityOwner" android:theme="@android:style/Theme.Material.Light.NoActionBar">
+        <activity android:name=".OwnerActivity" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <provider
+            android:name=".PrivateProvider"
+            android:authorities="org.example.securitylab.owner.private"
+            android:exported="false" />
+        <provider
+            android:name=".PublicProvider"
+            android:authorities="org.example.securitylab.owner.public"
+            android:exported="true" />
+        <provider
+            android:name=".ProtectedProvider"
+            android:authorities="org.example.securitylab.owner.protected"
+            android:exported="true"
+            android:readPermission="org.example.securitylab.owner.permission.READ_SECURE" />
+    </application>
+</manifest>
