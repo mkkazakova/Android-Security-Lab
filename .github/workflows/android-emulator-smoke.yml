@@ -1,0 +1,144 @@
+name: Android Security Lab - Emulator readiness
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/android-emulator-smoke.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  emulator-readiness:
+    name: Android API ${{ matrix.api-level }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        api-level: [33, 36]  # Android 13 and Android 16
+    env:
+      ANDROID_TEST_API_LEVEL: ${{ matrix.api-level }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Enable KVM acceleration
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          ls -l /dev/kvm
+
+      # The emulator action treats input 'script' as shell commands; for a
+      # nontrivial script, generate a real file and pass only a single command.
+      - name: Prepare emulator diagnostics script
+        shell: bash
+        run: |
+          cat > android-emulator-smoke.sh <<'BASH'
+          #!/usr/bin/env bash
+          set -euo pipefail
+
+          OUT="results/android-${ANDROID_TEST_API_LEVEL}"
+          mkdir -p "$OUT"
+          adb wait-for-device
+          adb devices -l > "$OUT/adb-devices.txt"
+
+          # Non-privileged, read-only evidence from the running emulator.
+          adb shell getprop ro.build.version.release | tr -d '\r' > "$OUT/android-release.txt"
+          adb shell getprop ro.build.version.sdk | tr -d '\r' > "$OUT/android-sdk.txt"
+          adb shell getprop ro.build.fingerprint | tr -d '\r' > "$OUT/build-fingerprint.txt"
+          adb shell getprop sys.boot_completed | tr -d '\r' > "$OUT/boot-completed.txt"
+          (adb shell getenforce || true) | tr -d '\r' > "$OUT/selinux-mode.txt"
+          (adb shell getprop ro.crypto.state || true) | tr -d '\r' > "$OUT/crypto-state.txt"
+          (adb shell getprop ro.crypto.type || true) | tr -d '\r' > "$OUT/crypto-type.txt"
+          (adb shell getprop ro.boot.verifiedbootstate || true) | tr -d '\r' > "$OUT/verified-boot-state.txt"
+          adb shell pm list packages -3 > "$OUT/user-app-packages.txt"
+
+          # Bring up the home screen before recording visual evidence.
+          adb shell input keyevent KEYCODE_WAKEUP || true
+          adb shell wm dismiss-keyguard || true
+          adb shell input keyevent KEYCODE_HOME || true
+          sleep 2
+
+          # Real PNG screenshot from the actual Android virtual device.
+          adb exec-out screencap -p > "$OUT/screenshot.png"
+          adb logcat -d -t 500 > "$OUT/logcat-tail.txt" || true
+
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          api = int(os.environ['ANDROID_TEST_API_LEVEL'])
+          base = Path('results') / f'android-{api}'
+          def read(name):
+              p = base / name
+              return p.read_text(encoding='utf-8', errors='replace').strip() if p.is_file() else ''
+
+          png = base / 'screenshot.png'
+          checks = {
+              'android_boot_complete': read('boot-completed.txt') == '1',
+              'expected_android_api': read('android-sdk.txt') == str(api),
+              'real_png_screenshot': png.is_file() and png.read_bytes().startswith(b'\x89PNG\r\n\x1a\n'),
+          }
+          report = {
+              'kind': 'android_emulator_infrastructure_smoke_test',
+              'environment': 'GitHub Actions hosted Android Emulator (not physical Android hardware)',
+              'requested_api': api,
+              'observed_api': read('android-sdk.txt'),
+              'android_release': read('android-release.txt'),
+              'build_fingerprint': read('build-fingerprint.txt'),
+              'selinux_mode_observed': read('selinux-mode.txt'),
+              'emulator_crypto_state_observed': read('crypto-state.txt'),
+              'emulator_crypto_type_observed': read('crypto-type.txt'),
+              'emulator_verified_boot_property_observed': read('verified-boot-state.txt'),
+              'checks': checks,
+              'status': 'PASS' if all(checks.values()) else 'FAIL',
+              'scope_note': 'This validates emulator boot, API level, and evidence capture. It does not test application sandbox, IPC, Keystore, or hardware security.',
+          }
+          (base / 'result.json').write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+          print(json.dumps(report, ensure_ascii=False, indent=2))
+          if not all(checks.values()):
+              raise SystemExit('Infrastructure readiness check failed. Inspect result.json and ADB logs.')
+          PY
+          BASH
+
+      - name: Run Android emulator and collect real evidence
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: ${{ matrix.api-level }}
+          target: google_apis
+          arch: x86_64
+          ram-size: 2048M
+          cores: 2
+          script: bash ./android-emulator-smoke.sh
+
+      - name: Add summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "### Android API $ANDROID_TEST_API_LEVEL - emulator readiness"
+            if [ -f "results/android-$ANDROID_TEST_API_LEVEL/result.json" ]; then
+              echo '```json'
+              cat "results/android-$ANDROID_TEST_API_LEVEL/result.json"
+              echo '```'
+            else
+              echo 'No result.json: emulator may have failed to launch. Check job logs.'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload logs, reports and screenshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-api-${{ matrix.api-level }}-readiness
+          path: results/android-${{ matrix.api-level }}/
+          if-no-files-found: warn
+          retention-days: 14
