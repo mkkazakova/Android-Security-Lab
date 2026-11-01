@@ -1,3 +1,4 @@
+
 name: Android Security Lab - Emulator readiness
 
 on:
@@ -9,15 +10,21 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: android-readiness-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   emulator-readiness:
     name: Android API ${{ matrix.api-level }}
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+
     strategy:
       fail-fast: false
       matrix:
-        api-level: [33, 36]  # Android 13 and Android 16
+        api-level: [33, 36]
+
     env:
       ANDROID_TEST_API_LEVEL: ${{ matrix.api-level }}
 
@@ -35,8 +42,6 @@ jobs:
           sudo udevadm trigger --name-match=kvm
           ls -l /dev/kvm
 
-      # The emulator action treats input 'script' as shell commands; for a
-      # nontrivial script, generate a real file and pass only a single command.
       - name: Prepare emulator diagnostics script
         shell: bash
         run: |
@@ -46,27 +51,27 @@ jobs:
 
           OUT="results/android-${ANDROID_TEST_API_LEVEL}"
           mkdir -p "$OUT"
+
           adb wait-for-device
           adb devices -l > "$OUT/adb-devices.txt"
 
-          # Non-privileged, read-only evidence from the running emulator.
           adb shell getprop ro.build.version.release | tr -d '\r' > "$OUT/android-release.txt"
           adb shell getprop ro.build.version.sdk | tr -d '\r' > "$OUT/android-sdk.txt"
           adb shell getprop ro.build.fingerprint | tr -d '\r' > "$OUT/build-fingerprint.txt"
           adb shell getprop sys.boot_completed | tr -d '\r' > "$OUT/boot-completed.txt"
+
           (adb shell getenforce || true) | tr -d '\r' > "$OUT/selinux-mode.txt"
           (adb shell getprop ro.crypto.state || true) | tr -d '\r' > "$OUT/crypto-state.txt"
           (adb shell getprop ro.crypto.type || true) | tr -d '\r' > "$OUT/crypto-type.txt"
           (adb shell getprop ro.boot.verifiedbootstate || true) | tr -d '\r' > "$OUT/verified-boot-state.txt"
+
           adb shell pm list packages -3 > "$OUT/user-app-packages.txt"
 
-          # Bring up the home screen before recording visual evidence.
           adb shell input keyevent KEYCODE_WAKEUP || true
           adb shell wm dismiss-keyguard || true
           adb shell input keyevent KEYCODE_HOME || true
           sleep 2
 
-          # Real PNG screenshot from the actual Android virtual device.
           adb exec-out screencap -p > "$OUT/screenshot.png"
           adb logcat -d -t 500 > "$OUT/logcat-tail.txt" || true
 
@@ -77,16 +82,25 @@ jobs:
 
           api = int(os.environ['ANDROID_TEST_API_LEVEL'])
           base = Path('results') / f'android-{api}'
+
           def read(name):
               p = base / name
-              return p.read_text(encoding='utf-8', errors='replace').strip() if p.is_file() else ''
+              return p.read_text(
+                  encoding='utf-8',
+                  errors='replace'
+              ).strip() if p.is_file() else ''
 
           png = base / 'screenshot.png'
+
           checks = {
               'android_boot_complete': read('boot-completed.txt') == '1',
               'expected_android_api': read('android-sdk.txt') == str(api),
-              'real_png_screenshot': png.is_file() and png.read_bytes().startswith(b'\x89PNG\r\n\x1a\n'),
+              'real_png_screenshot': (
+                  png.is_file()
+                  and png.read_bytes().startswith(b'\x89PNG\r\n\x1a\n')
+              ),
           }
+
           report = {
               'kind': 'android_emulator_infrastructure_smoke_test',
               'environment': 'GitHub Actions hosted Android Emulator (not physical Android hardware)',
@@ -102,10 +116,18 @@ jobs:
               'status': 'PASS' if all(checks.values()) else 'FAIL',
               'scope_note': 'This validates emulator boot, API level, and evidence capture. It does not test application sandbox, IPC, Keystore, or hardware security.',
           }
-          (base / 'result.json').write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+
+          (base / 'result.json').write_text(
+              json.dumps(report, ensure_ascii=False, indent=2) + '\n',
+              encoding='utf-8'
+          )
+
           print(json.dumps(report, ensure_ascii=False, indent=2))
+
           if not all(checks.values()):
-              raise SystemExit('Infrastructure readiness check failed. Inspect result.json and ADB logs.')
+              raise SystemExit(
+                  'Infrastructure readiness check failed. Inspect result.json and ADB logs.'
+              )
           PY
           BASH
 
@@ -142,3 +164,264 @@ jobs:
           path: results/android-${{ matrix.api-level }}/
           if-no-files-found: warn
           retention-days: 14
+
+  publish-readme:
+    name: Publish results to README
+    needs: emulator-readiness
+    if: ${{ always() && github.ref_name == github.event.repository.default_branch }}
+    runs-on: ubuntu-24.04
+
+    permissions:
+      contents: write
+
+    env:
+      TARGET_BRANCH: ${{ github.ref_name }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download emulator results from this workflow run
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          pattern: android-api-*-readiness
+          path: downloaded
+          merge-multiple: false
+
+      - name: Update README and screenshots
+        shell: bash
+        run: |
+          python3 - <<'PYTHON'
+          import json
+          import os
+          import shutil
+          from datetime import datetime, timezone
+          from pathlib import Path
+
+          begin = '<!-- ANDROID_READINESS_RESULTS_START -->'
+          end = '<!-- ANDROID_READINESS_RESULTS_END -->'
+
+          readme = Path('README.md')
+          images = Path('docs/screenshots')
+          images.mkdir(parents=True, exist_ok=True)
+
+          def load_result(api):
+              location = Path('downloaded') / f'android-api-{api}-readiness'
+              path = location / 'result.json'
+
+              if not path.is_file():
+                  return None, location
+
+              try:
+                  data = json.loads(path.read_text(encoding='utf-8'))
+              except (ValueError, OSError):
+                  return None, location
+
+              if not isinstance(data, dict):
+                  return None, location
+
+              return data, location
+
+          def cell(value):
+              if value is None or str(value).strip() == '':
+                  return '—'
+
+              return (
+                  str(value)
+                  .replace('|', r'\|')
+                  .replace('\r', ' ')
+                  .replace('\n', ' ')
+                  .strip()
+              )
+
+          fields = [
+              (
+                  'Состояние инфраструктурного теста',
+                  'status'
+              ),
+              (
+                  'Фактическая версия Android',
+                  'android_release'
+              ),
+              (
+                  'Фактический API',
+                  'observed_api'
+              ),
+              (
+                  'SELinux (наблюдаемое состояние)',
+                  'selinux_mode_observed'
+              ),
+              (
+                  'Шифрование (состояние эмулятора)',
+                  'emulator_crypto_state_observed'
+              ),
+              (
+                  'Тип шифрования (эмулятор)',
+                  'emulator_crypto_type_observed'
+              ),
+              (
+                  'Verified Boot (свойство эмулятора)',
+                  'emulator_verified_boot_property_observed'
+              ),
+          ]
+
+          results = {}
+          shots = {}
+
+          for api, version in [(33, '13'), (36, '16')]:
+              data, folder = load_result(api)
+              results[api] = data
+
+              screenshot = folder / 'screenshot.png'
+              target = images / f'android-{version}.png'
+
+              if (
+                  data is not None
+                  and screenshot.is_file()
+                  and screenshot.read_bytes()[:8] == b'\x89PNG\r\n\x1a\n'
+              ):
+                  shutil.copyfile(screenshot, target)
+                  shots[api] = (
+                      f'<img src="docs/screenshots/android-{version}.png" '
+                      f'alt="Android {version}: реальный экран эмулятора" width="240">'
+                  )
+              else:
+                  target.unlink(missing_ok=True)
+                  shots[api] = 'Скриншот отсутствует'
+
+          def get(api, key):
+              data = results[api]
+
+              if data is None:
+                  return 'НЕТ ОТЧЁТА' if key == 'status' else '—'
+
+              return cell(data.get(key))
+
+          def check(api, key):
+              data = results[api]
+
+              if data is None:
+                  return '—'
+
+              value = data.get('checks', {}).get(key)
+
+              if value is True:
+                  return 'PASS'
+              if value is False:
+                  return 'FAIL'
+
+              return '—'
+
+          run_url = (
+              f"{os.environ['GITHUB_SERVER_URL']}/"
+              f"{os.environ['GITHUB_REPOSITORY']}/actions/runs/"
+              f"{os.environ['GITHUB_RUN_ID']}"
+          )
+
+          run_time = datetime.now(timezone.utc).strftime(
+              '%Y-%m-%d %H:%M UTC'
+          )
+
+          lines = [
+              begin,
+              '## Результаты последней проверки эмуляторов',
+              '',
+              f'Обновлено: **{run_time}**. '
+              f'[Открыть запуск GitHub Actions]({run_url}).',
+              '',
+              '| Параметр | Android 13 (API 33) | Android 16 (API 36) |',
+              '|---|---|---|',
+          ]
+
+          for label, key in fields:
+              lines.append(
+                  f'| {label} | {get(33, key)} | {get(36, key)} |'
+              )
+
+          for label, key in [
+              ('Загрузка Android завершена', 'android_boot_complete'),
+              ('Версия API соответствует ожидаемой', 'expected_android_api'),
+              ('Получен настоящий PNG', 'real_png_screenshot'),
+          ]:
+              lines.append(
+                  f'| {label} | {check(33, key)} | {check(36, key)} |'
+              )
+
+          lines.extend([
+              '',
+              '### Скриншоты виртуальных устройств',
+              '',
+              '| Android 13 | Android 16 |',
+              '|---|---|',
+              f'| {shots[33]} | {shots[36]} |',
+              '',
+              '> Примечание: это проверка запуска **эмулятора**, а не испытания '
+              'изоляции приложений, IPC, Keystore или аппаратного Verified Boot. '
+              'Значения системных свойств не доказывают эффективность защиты '
+              'на физическом смартфоне. Подробные журналы и JSON доступны '
+              'в Artifacts соответствующего запуска.',
+              '',
+              end,
+          ])
+
+          block = '\n'.join(lines)
+
+          original = (
+              readme.read_text(encoding='utf-8')
+              if readme.exists()
+              else '# Android Security Research Lab\n'
+          )
+
+          if begin in original and end in original:
+              before, after_begin = original.split(begin, 1)
+              _old, after = after_begin.split(end, 1)
+
+              updated = (
+                  before.rstrip()
+                  + '\n\n'
+                  + block
+                  + after
+              )
+
+          elif begin not in original and end not in original:
+              updated = original.rstrip() + '\n\n' + block + '\n'
+
+          else:
+              raise RuntimeError(
+                  'README contains only one of the two managed section markers'
+              )
+
+          readme.write_text(
+              updated.rstrip() + '\n',
+              encoding='utf-8'
+          )
+
+          print('Updated README.md and screenshots:')
+
+          for api in [33, 36]:
+              print(f'  API {api}: {get(api, "status")}')
+
+          PYTHON
+
+      - name: Commit updated README and screenshots
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add -A -- README.md
+
+          if [ -n "$(find docs/screenshots -maxdepth 1 -type f -name '*.png' -print -quit)" ] \
+             || [ -n "$(git ls-files -- docs/screenshots/)" ]; then
+            git add -A -- docs/screenshots/
+          fi
+
+          if git diff --cached --quiet; then
+            echo "README and screenshots are already up to date."
+          else
+            git commit -m "docs: update Android emulator readiness results [skip ci]"
+            git push origin "HEAD:${TARGET_BRANCH}"
+          fi
