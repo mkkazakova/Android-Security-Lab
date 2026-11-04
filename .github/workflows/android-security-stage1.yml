@@ -1,5 +1,5 @@
 
-name: Android Security Lab - Stage 1 Sandbox IPC
+name: Android Security Lab - Sandbox IPC and Runtime Permissions
 
 on:
   workflow_dispatch:
@@ -8,70 +8,12 @@ permissions:
   contents: read
 
 concurrency:
-  group: android-stage1-${{ github.ref }}
+  group: android-security-stage2-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  prepare:
-    name: Fix existing Kotlin build files
-    if: ${{ github.ref_name == github.event.repository.default_branch }}
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: write
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v6
-        with:
-          ref: ${{ github.ref_name }}
-
-      - name: Migrate Kotlin compiler settings
-        shell: bash
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-
-          old = '    kotlinOptions { jvmTarget = "17" }'
-          new = '''kotlin {
-              compilerOptions {
-                  jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
-              }
-          }
-          '''
-
-          for module in ('owner', 'client'):
-              file = Path(module) / 'build.gradle.kts'
-              if not file.is_file():
-                  raise SystemExit(f'Missing build file: {file}')
-              text = file.read_text(encoding='utf-8')
-
-              if old in text:
-                  text = text.replace(old, '', 1).rstrip() + '\n\n' + new
-                  file.write_text(text, encoding='utf-8')
-                  print(f'Updated: {file}')
-              elif ('compilerOptions' in text and 'JvmTarget.JVM_17' in text):
-                  print(f'Already migrated: {file}')
-              else:
-                  raise SystemExit(f'Unknown Kotlin configuration: {file}')
-          PY
-
-      - name: Commit migration (only two Gradle files)
-        shell: bash
-        run: |
-          set -euo pipefail
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add -- owner/build.gradle.kts client/build.gradle.kts
-          if git diff --cached --quiet; then
-            echo 'No source changes required.'
-          else
-            git commit -m 'fix(build): migrate Kotlin compiler options [skip ci]'
-            git push origin "HEAD:${{ github.ref_name }}"
-          fi
-
   android-tests:
-    name: Sandbox IPC / Android API ${{ matrix.api }}
-    needs: prepare
+    name: Eight experiments / Android API ${{ matrix.api }}
     runs-on: ubuntu-24.04
     timeout-minutes: 55
 
@@ -81,34 +23,44 @@ jobs:
         api: [33, 36]
 
     steps:
-      - name: Checkout latest source files
+      - name: Checkout project
         uses: actions/checkout@v6
         with:
           ref: ${{ github.ref_name }}
 
-      - name: Install Java 17
+      - name: Set up Java 17
         uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: '17'
 
-      - name: Setup Gradle
+      - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
         with:
           cache-provider: basic
 
-      - name: Setup Android SDK
+      - name: Set up Android SDK
         uses: android-actions/setup-android@v4
 
-      - name: Install Android build platform
+      - name: Install build platform
         shell: bash
         run: sdkmanager 'platforms;android-36' 'build-tools;35.0.0'
 
-      - name: Build the two applications
+      - name: Verify Stage 2 files
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f client/src/main/java/org/example/securitylab/client/PermissionProbeActivity.kt
+          test -f scripts/run-stage1.sh
+          test -f scripts/run-stage2.sh
+          test -f experiments/permissions.md
+          bash -n scripts/run-stage1.sh scripts/run-stage2.sh
+
+      - name: Build both applications
         shell: bash
         run: ./gradlew :owner:assembleDebug :client:assembleDebug --no-daemon --stacktrace
 
-      - name: Enable KVM acceleration
+      - name: Enable KVM
         shell: bash
         run: |
           set -euo pipefail
@@ -118,7 +70,7 @@ jobs:
           sudo udevadm trigger --name-match=kvm
           ls -l /dev/kvm
 
-      - name: Run Stage 1 experiments on Android Emulator
+      - name: Run S1-S5 and P1-P3 in Android Emulator
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: ${{ matrix.api }}
@@ -126,9 +78,9 @@ jobs:
           arch: x86_64
           ram-size: 2048M
           cores: 2
-          script: bash scripts/run-stage1.sh
+          script: bash scripts/run-stage2.sh
 
-      - name: Summarize test results
+      - name: Show JSON result in GitHub Actions
         if: always()
         shell: bash
         env:
@@ -136,19 +88,19 @@ jobs:
         run: |
           report="results/stage1-api-${TEST_API}/report.json"
           {
-            echo "### Stage 1, Android API ${TEST_API}"
+            echo "### Stage 2: Android API ${TEST_API}"
             if [ -f "$report" ]; then
               echo '```json'
               cat "$report"
               echo '```'
             else
-              echo 'No report was generated. Inspect the failed build or emulator step.'
+              echo 'Report missing. Inspect the failed step; do not interpret as PASS.'
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Upload logs and screenshots
+      - name: Upload evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: securitylab-api-${{ matrix.api }}
           path: results/stage1-api-${{ matrix.api }}/
@@ -156,28 +108,29 @@ jobs:
           retention-days: 14
 
   publish-readme:
-    name: Publish Stage 1 results to README
-    needs: [prepare, android-tests]
-    if: ${{ always() && needs.prepare.result == 'success' && github.ref_name == github.event.repository.default_branch }}
+    name: Publish eight experiments to README
+    needs: android-tests
+    if: ${{ always() && github.ref_name == github.event.repository.default_branch }}
     runs-on: ubuntu-24.04
+
     permissions:
       contents: write
 
     steps:
-      - name: Checkout repository
+      - name: Checkout project
         uses: actions/checkout@v6
         with:
           ref: ${{ github.ref_name }}
 
-      - name: Download this run's test reports
-        uses: actions/download-artifact@v4
+      - name: Download evidence from this run
+        uses: actions/download-artifact@v7
         continue-on-error: true
         with:
           pattern: securitylab-api-*
           path: downloaded
           merge-multiple: false
 
-      - name: Update only the Stage 1 section in README
+      - name: Update only the experiment results section
         shell: bash
         run: |
           python3 - <<'PY'
@@ -193,107 +146,208 @@ jobs:
           screenshots = Path('docs/screenshots')
           screenshots.mkdir(parents=True, exist_ok=True)
 
-          tests = {
+          descriptions = {
               'S1': 'Owner читает собственный приватный файл',
               'S2': 'Client пытается прочитать приватный файл Owner',
               'S3': 'Client обращается к закрытому ContentProvider',
               'S4': 'Client обращается к открытому ContentProvider',
-              'S5': 'Client обращается к Provider с signature-разрешением',
+              'S5': 'Client обращается к защищённому разрешением ContentProvider',
+              'P1': 'CAMERA: разрешение отсутствует',
+              'P2': 'CAMERA: разрешение выдано',
+              'P3': 'CAMERA: разрешение отозвано',
           }
 
           reports = {}
-          pictures = {}
-          for api, android in [(33, '13'), (36, '16')]:
+          screenshots_md = {}
+
+          for api, version in ((33, '13'), (36, '16')):
               folder = Path('downloaded') / f'securitylab-api-{api}'
+
               try:
-                  reports[api] = json.loads((folder / 'report.json').read_text(encoding='utf-8'))
+                  data = json.loads(
+                      (folder / 'report.json').read_text(
+                          encoding='utf-8'
+                      )
+                  )
+
+                  if not isinstance(data, dict) or data.get('api') != api:
+                      raise ValueError('Wrong API or malformed report')
+
+                  reports[api] = data
+
               except (OSError, ValueError):
                   reports[api] = None
 
               for kind in ('owner', 'client'):
-                  src = folder / f'{kind}.png'
-                  dest = screenshots / f'stage1-android-{android}-{kind}.png'
-                  if reports[api] and src.is_file() and src.read_bytes().startswith(b'\x89PNG\r\n\x1a\n'):
-                      shutil.copyfile(src, dest)
-                      pictures[(api, kind)] = f'<img src="{dest.as_posix()}" width="240" alt="{kind}, Android {android}">'
+                  source = folder / f'{kind}.png'
+                  target = screenshots / f'stage1-android-{version}-{kind}.png'
+
+                  if (
+                      reports[api] is not None
+                      and source.is_file()
+                      and source.read_bytes().startswith(b'\x89PNG\r\n\x1a\n')
+                  ):
+                      shutil.copyfile(source, target)
+                      screenshots_md[(api, kind)] = (
+                          f'<img src="{target.as_posix()}" width="240" '
+                          f'alt="{kind}, Android {version}">'
+                      )
                   else:
-                      # Do not show an old screenshot as evidence for a new run.
-                      pictures[(api, kind)] = 'Скриншот отсутствует'
+                      target.unlink(missing_ok=True)
+                      screenshots_md[(api, kind)] = (
+                          'Нет скриншота текущего запуска'
+                      )
 
-          def show(api, experiment):
-              report = reports[api]
-              if not report:
+          def result(api, test_id):
+              data = reports[api]
+
+              if data is None:
                   return 'НЕТ ОТЧЁТА'
-              record = next((r for r in report.get('results', []) if r.get('id') == experiment), None)
-              if not record:
-                  return 'НЕ ВЫПОЛНЕН'
-              observed = str(record.get('observed', '?')).replace('|', '/').replace('\n', ' ')
-              return ('PASS' if record.get('pass') is True else 'FAIL') + f' ({observed})'
 
-          now = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
-          run_url = (
-              f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}"
-              f"/actions/runs/{os.environ['GITHUB_RUN_ID']}"
+              found = next(
+                  (
+                      x for x in data.get('results', [])
+                      if isinstance(x, dict)
+                      and x.get('id') == test_id
+                  ),
+                  None
+              )
+
+              if found is None:
+                  return 'НЕ ВЫПОЛНЕН'
+
+              observed = str(found.get('observed', '?'))
+              observed = (
+                  observed.replace('|', '/')
+                  .replace('\n', ' ')
+                  .replace('\r', ' ')
+              )
+
+              if found.get('pass') is True:
+                  return f'PASS ({observed})'
+
+              if observed == 'ERROR':
+                  return 'ERROR'
+
+              return f'FAIL ({observed})'
+
+          def overall(api):
+              data = reports[api]
+
+              if data is None:
+                  return 'NO REPORT'
+
+              if len(data.get('results', [])) < 8:
+                  return 'INCOMPLETE'
+
+              return str(data.get('status', 'UNKNOWN'))
+
+          now = datetime.now(timezone.utc).strftime(
+              '%Y-%m-%d %H:%M UTC'
           )
+
+          run_url = (
+              f"{os.environ['GITHUB_SERVER_URL']}/"
+              f"{os.environ['GITHUB_REPOSITORY']}/actions/runs/"
+              f"{os.environ['GITHUB_RUN_ID']}"
+          )
+
           lines = [
               start,
-              '## Эксперименты: Application Sandbox и IPC',
+              '## Эксперименты: Sandbox, IPC и Runtime Permissions',
               '',
-              f'Обновлено: **{now}**. [Запуск GitHub Actions]({run_url}).',
+              f'Последнее испытание: **{now}**. '
+              f'[Открыть запуск GitHub Actions]({run_url}).',
               '',
               '| Сценарий | Android 13 (API 33) | Android 16 (API 36) |',
               '|---|---|---|',
           ]
-          for test_id, title in tests.items():
-              lines.append(f'| **{test_id}** — {title} | {show(33, test_id)} | {show(36, test_id)} |')
 
-          def overall(api):
-              return str(reports[api].get('status', 'UNKNOWN')) if reports[api] else 'NO REPORT'
+          for test_id, description in descriptions.items():
+              lines.append(
+                  f'| **{test_id}** — {description} | '
+                  f'{result(33, test_id)} | {result(36, test_id)} |'
+              )
 
           lines.extend([
               '',
-              f'**Итог:** Android 13 — {overall(33)}; Android 16 — {overall(36)}.',
+              f'**Итог:** Android 13 — {overall(33)}; '
+              f'Android 16 — {overall(36)}.',
               '',
               '### Скриншоты последнего запуска',
               '',
               '| Приложение | Android 13 | Android 16 |',
               '|---|---|---|',
           ])
-          for kind, title in [('owner', 'SecurityOwner'), ('client', 'SecurityClient')]:
-              lines.append(f'| {title} | {pictures[(33, kind)]} | {pictures[(36, kind)]} |')
+
+          for kind, title in [
+              ('owner', 'SecurityOwner'),
+              ('client', 'SecurityClient')
+          ]:
+              lines.append(
+                  f'| {title} | {screenshots_md[(33, kind)]} | '
+                  f'{screenshots_md[(36, kind)]} |'
+              )
+
           lines.extend([
               '',
-              '> Данные получены из Android Emulator; аппаратные механизмы защиты смартфона здесь не проверяются.',
-              '> Отсутствующий отчёт не считается успешным экспериментом. Полные журналы доступны в Artifacts запуска.',
+              '> Результаты относятся к Android Emulator, '
+              'а не к аппаратной защите смартфона. '
+              'P1–P3 проверяют состояние разрешения внутри приложения '
+              'после изменения его через ADB.',
+              '',
+              '> Полные JSON-отчёты и журналы доступны '
+              'в Artifacts указанного запуска.',
               '',
               end,
           ])
+
           block = '\n'.join(lines)
-          original = readme.read_text(encoding='utf-8') if readme.is_file() else '# Android Security Lab\n'
+
+          original = (
+              readme.read_text(encoding='utf-8')
+              if readme.is_file()
+              else '# Android Security Lab\n'
+          )
 
           if start in original and end in original:
               before, remainder = original.split(start, 1)
               _, after = remainder.split(end, 1)
-              updated = before.rstrip() + '\n\n' + block + after
-          elif start not in original and end not in original:
-              updated = original.rstrip() + '\n\n' + block + '\n'
-          else:
-              raise SystemExit('README has incomplete Stage 1 markers; refusing to overwrite it.')
 
-          readme.write_text(updated.rstrip() + '\n', encoding='utf-8')
+              updated = (
+                  before.rstrip() + '\n\n' + block + after
+              )
+
+          elif start not in original and end not in original:
+              updated = (
+                  original.rstrip() + '\n\n' + block + '\n'
+              )
+
+          else:
+              raise SystemExit(
+                  'README markers are inconsistent: refusing to overwrite'
+              )
+
+          readme.write_text(
+              updated.rstrip() + '\n',
+              encoding='utf-8'
+          )
           PY
 
       - name: Commit README and current screenshots
         shell: bash
         run: |
           set -euo pipefail
+
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+
           git add -- README.md
           git add -A -- docs/screenshots/
+
           if git diff --cached --quiet; then
             echo 'No README changes.'
           else
-            git commit -m 'docs: publish Stage 1 test results [skip ci]'
+            git commit -m 'docs: publish eight Android security experiments [skip ci]'
             git push origin "HEAD:${{ github.ref_name }}"
           fi
