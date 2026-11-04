@@ -29,9 +29,9 @@
 <!-- ANDROID_READINESS_RESULTS_END -->
 
 <!-- ANDROID_STAGE1_START -->
-## Эксперименты: Application Sandbox и IPC
+## Эксперименты: Sandbox, IPC и Runtime Permissions
 
-Обновлено: **2026-11-04 21:07 UTC**. [Запуск GitHub Actions](https://github.com/mkkazakova/Android-Security-Lab/actions/runs/41912275087).
+Последнее испытание: **2026-11-04 22:01 UTC**. [Открыть запуск GitHub Actions](https://github.com/mkkazakova/Android-Security-Lab/actions/runs/41921012201).
 
 | Сценарий | Android 13 (API 33) | Android 16 (API 36) |
 |---|---|---|
@@ -39,7 +39,10 @@
 | **S2** — Client пытается прочитать приватный файл Owner | PASS (DENY) | PASS (DENY) |
 | **S3** — Client обращается к закрытому ContentProvider | PASS (DENY) | PASS (DENY) |
 | **S4** — Client обращается к открытому ContentProvider | PASS (ALLOW) | PASS (ALLOW) |
-| **S5** — Client обращается к Provider с signature-разрешением | PASS (DENY) | PASS (DENY) |
+| **S5** — Client обращается к защищённому разрешением ContentProvider | PASS (DENY) | PASS (DENY) |
+| **P1** — CAMERA: разрешение отсутствует | PASS (DENY) | PASS (DENY) |
+| **P2** — CAMERA: разрешение выдано | PASS (ALLOW) | PASS (ALLOW) |
+| **P3** — CAMERA: разрешение отозвано | PASS (DENY) | PASS (DENY) |
 
 **Итог:** Android 13 — PASS; Android 16 — PASS.
 
@@ -50,8 +53,9 @@
 | SecurityOwner | <img src="docs/screenshots/stage1-android-13-owner.png" width="240" alt="owner, Android 13"> | <img src="docs/screenshots/stage1-android-16-owner.png" width="240" alt="owner, Android 16"> |
 | SecurityClient | <img src="docs/screenshots/stage1-android-13-client.png" width="240" alt="client, Android 13"> | <img src="docs/screenshots/stage1-android-16-client.png" width="240" alt="client, Android 16"> |
 
-> Данные получены из Android Emulator; аппаратные механизмы защиты смартфона здесь не проверяются.
-> Отсутствующий отчёт не считается успешным экспериментом. Полные журналы доступны в Artifacts запуска.
+> Результаты относятся к Android Emulator, а не к аппаратной защите смартфона. P1–P3 проверяют состояние разрешения внутри приложения после изменения его через ADB.
+
+> Полные JSON-отчёты и журналы доступны в Artifacts указанного запуска.
 
 <!-- ANDROID_STAGE1_END -->
 
