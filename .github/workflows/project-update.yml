@@ -285,7 +285,6 @@ jobs:
             client/src/main/java/org/example/securitylab/client/PermissionProbeActivity.kt \
             scripts/run-stage2.sh \
             experiments/permissions.md \
-            .github/workflows/android-security-stage1.yml
           if git diff --cached --quiet; then
             echo 'Stage 2 is already up to date.'
           else
