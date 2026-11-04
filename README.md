@@ -29,32 +29,29 @@
 <!-- ANDROID_READINESS_RESULTS_END -->
 
 <!-- ANDROID_STAGE1_START -->
-## Эксперименты: изоляция приложений и IPC
+## Эксперименты: Application Sandbox и IPC
 
-Данные получены при автоматизированном запуске двух обычных приложений в Android Emulator.
-Обновлено: 2026-11-01 22:24 UTC.
-[Открыть запуск GitHub Actions](https://github.com/mkkazakova/Android-Security-Lab/actions/runs/41356826442).
+Обновлено: **2026-11-04 21:07 UTC**. [Запуск GitHub Actions](https://github.com/mkkazakova/Android-Security-Lab/actions/runs/41912275087).
 
 | Сценарий | Android 13 (API 33) | Android 16 (API 36) |
 |---|---|---|
-| **S1** — Owner читает собственный приватный файл | НЕТ ОТЧЁТА | НЕТ ОТЧЁТА |
-| **S2** — Client пытается напрямую читать приватный файл Owner | НЕТ ОТЧЁТА | НЕТ ОТЧЁТА |
-| **S3** — Client обращается к закрытому ContentProvider | НЕТ ОТЧЁТА | НЕТ ОТЧЁТА |
-| **S4** — Client обращается к открытому ContentProvider | НЕТ ОТЧЁТА | НЕТ ОТЧЁТА |
-| **S5** — Client обращается к Provider с signature-разрешением | НЕТ ОТЧЁТА | НЕТ ОТЧЁТА |
+| **S1** — Owner читает собственный приватный файл | PASS (ALLOW) | PASS (ALLOW) |
+| **S2** — Client пытается прочитать приватный файл Owner | PASS (DENY) | PASS (DENY) |
+| **S3** — Client обращается к закрытому ContentProvider | PASS (DENY) | PASS (DENY) |
+| **S4** — Client обращается к открытому ContentProvider | PASS (ALLOW) | PASS (ALLOW) |
+| **S5** — Client обращается к Provider с signature-разрешением | PASS (DENY) | PASS (DENY) |
 
-**Итог:** Android 13 — NO REPORT; Android 16 — NO REPORT.
+**Итог:** Android 13 — PASS; Android 16 — PASS.
 
-### Фактические скриншоты приложений
+### Скриншоты последнего запуска
 
-| Android 13 | Android 16 |
-|---|---|
-| Нет изображения | Нет изображения |
-| Нет изображения | Нет изображения |
+| Приложение | Android 13 | Android 16 |
+|---|---|---|
+| SecurityOwner | <img src="docs/screenshots/stage1-android-13-owner.png" width="240" alt="owner, Android 13"> | <img src="docs/screenshots/stage1-android-16-owner.png" width="240" alt="owner, Android 16"> |
+| SecurityClient | <img src="docs/screenshots/stage1-android-13-client.png" width="240" alt="client, Android 13"> | <img src="docs/screenshots/stage1-android-16-client.png" width="240" alt="client, Android 16"> |
 
-> Это результаты испытаний **виртуальных устройств**, а не физического смартфона. Проверка S2 подтверждается только при наличии исходного файла у Owner; проверка S4 используется как положительный контроль для IPC.
-
-Подробные JSON-отчёты, журналы и изображения доступны в разделе Artifacts указанного запуска.
+> Данные получены из Android Emulator; аппаратные механизмы защиты смартфона здесь не проверяются.
+> Отсутствующий отчёт не считается успешным экспериментом. Полные журналы доступны в Artifacts запуска.
 
 <!-- ANDROID_STAGE1_END -->
 
