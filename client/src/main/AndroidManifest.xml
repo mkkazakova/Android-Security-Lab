@@ -5,6 +5,7 @@
         <provider android:authorities="org.example.securitylab.owner.public" />
         <provider android:authorities="org.example.securitylab.owner.protected" />
     </queries>
+    <uses-permission android:name="android.permission.CAMERA" />
     <application android:label="SecurityClient" android:theme="@android:style/Theme.Material.Light.NoActionBar">
         <activity android:name=".ClientActivity" android:exported="true">
             <intent-filter>
@@ -12,5 +13,6 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <activity android:name=".PermissionProbeActivity" android:exported="true" />
     </application>
 </manifest>
