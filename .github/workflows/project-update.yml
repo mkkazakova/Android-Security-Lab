@@ -1,142 +1,95 @@
-              '',
-              f'**Сводный статус:** Android 13 — {total(33)}; Android 16 — {total(36)}.',
-              '',
-              '### Наблюдения и интерпретация',
-              '',
-              '| Сценарий | Android 13: наблюдение | Android 16: наблюдение |',
-              '|---|---|---|',
-          ])
-          for test in TESTS:
-              tid = test['id']
-              lines.append(f"| {tid} | {row_for(33, tid)[1]} | {row_for(36, tid)[1]} |")
-          lines.extend([
-              '',
-              '### Скриншоты из Android Emulator',
-              '',
-              '| Материал | Android 13 | Android 16 |',
-              '|---|---|---|',
-          ])
-          for kind, label in (('owner', 'SecurityOwner'), ('client', 'SecurityClient'), ('f3-picker', 'Системный выбор документа F3')):
-              lines.append(f"| {label} | {screenshots[(33, kind)]} | {screenshots[(36, kind)]} |")
-          lines.extend([
-              '',
-              '> PASS означает совпадение наблюдаемого поведения с гипотезой, в том числе при отказе в доступе. ',
-              '> Инфраструктурная ошибка не считается подтверждением механизма безопасности. ',
-              '> Тесты выполняются в эмуляторах, без выводов об аппаратной защите физического смартфона.',
-              '',
-              'Подробные машинно-читаемые данные находятся в [`results/`](results/), а журналы и дополнительные файлы — в Artifacts запуска.',
-              '',
-              END,
-          ])
-          block = '\n'.join(lines)
-          original = README.read_text(encoding='utf-8') if README.is_file() else '# Android Security Lab\n'
-          if START in original and END in original:
-              before, remainder = original.split(START, 1)
-              _, after = remainder.split(END, 1)
-              updated = before.rstrip() + '\n\n' + block + after
-          elif START not in original and END not in original:
-              updated = original.rstrip() + '\n\n' + block + '\n'
-          else:
-              raise SystemExit('README has one missing management marker; no replacement performed')
-          README.write_text(updated.rstrip() + '\n', encoding='utf-8')
-          (RESULTS / 'summary.json').write_text(json.dumps({
-              'generated_at_utc': when,
-              'workflow_run_url': url,
-              'expected_scenarios': [x['id'] for x in TESTS],
-              'api_33': total(33),
-              'api_36': total(36),
-          }, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
-          print('Published', len(TESTS), 'unique scenarios: Android 13', total(33), '/ Android 16', total(36))
-          STAGE3_PUBLISH_RESULTS_PY
-          write_managed "experiments/catalog.json" '"managed_by": "project-update.yml"' <<'STAGE3_CATALOG_JSON'
-          {
-            "managed_by": "project-update.yml",
-            "experiments": [
-              {"id": "S1", "title": "Владелец читает собственный приватный файл"},
-              {"id": "S2", "title": "Другой UID не читает приватный файл"},
-              {"id": "S3", "title": "Закрытый ContentProvider отклоняет запрос"},
-              {"id": "S4", "title": "Открытый ContentProvider предоставляет данные"},
-              {"id": "S5", "title": "ContentProvider защищён разрешением"},
-              {"id": "P1", "title": "CAMERA: разрешение отсутствует"},
-              {"id": "P2", "title": "CAMERA: разрешение выдано"},
-              {"id": "P3", "title": "CAMERA: разрешение отозвано"},
-              {"id": "F1", "title": "Владелец читает свой app-specific внешний файл"},
-              {"id": "F2", "title": "Другому приложению запрещён прямой доступ к app-specific файлу"},
-              {"id": "F3", "title": "Доступ к документу через системный выбор файла"}
-            ]
-          }
-          STAGE3_CATALOG_JSON
-          write_managed "experiments/storage.md" 'Managed by project-update.yml' <<'STAGE3_STORAGE_MD'
-          <!-- Managed by project-update.yml - Stage 3 -->
-          # Scoped Storage: методика F1–F3
+name: Android Security Lab - Update Project (Stage 3)
 
-          Исследуются ограничения доступа к файлам на Android 13 и Android 16 при фиксированном `targetSdk=33`.
+on:
+  workflow_dispatch:
 
-          | ID | Действие | Ожидается |
-          |---|---|---|
-          | F1 | Owner создаёт и читает тестовый файл в `getExternalFilesDir(null)` | ALLOW |
-          | F2 | Client напрямую читает этот файл по пути `/storage/emulated/0/Android/data/<owner>/files/...` | DENY |
-          | F3 | Client вызывает `ACTION_OPEN_DOCUMENT`, выбирает синтетический документ в системном интерфейсе, затем читает выданный URI | ALLOW |
+permissions:
+  contents: write
 
-          F1 является положительным контролем для F2: при его провале отрицательный тест не считается подтверждённым. Содержание файлов синтетическое, персональные данные не используются.
+concurrency:
+  group: android-security-project-update
+  cancel-in-progress: false
 
-          F3 действительно использует системный документный интерфейс Android, а не напрямую предоставленный из ADB URI. ADB используется только для подготовки тестового файла в папке Download и автоматизации нажатия на элемент интерфейса. Ошибка UI-автоматизации фиксируется как ERROR/FAIL, не как ошибка безопасности Android.
+jobs:
+  update-project:
+    name: Add Scoped Storage experiments F1-F3
+    if: ${{ github.ref_name == github.event.repository.default_branch }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.repository.default_branch }}
 
-          На эмуляторах не проверяется защита физической флеш-памяти и аппаратные механизмы.
-
-          Документация: https://developer.android.com/about/versions/11/privacy/storage ; https://developer.android.com/training/data-storage/shared/documents-files
-          STAGE3_STORAGE_MD
-          python3 - <<'PY_MANIFEST'
-          from pathlib import Path
-
-          for module in ('owner', 'client'):
-              path = Path(module) / 'src/main/AndroidManifest.xml'
-              xml = path.read_text(encoding='utf-8')
-              name = '.StorageProbeActivity'
-              if f'android:name="{name}"' in xml:
-                  print(f'Already declared: {module} StorageProbeActivity')
-                  continue
-              closing = '</application>'
-              if xml.count(closing) != 1:
-                  raise SystemExit(f'Unexpected manifest structure: {path}')
-              xml = xml.replace(
-                  closing,
-                  '        <activity android:name=".StorageProbeActivity" android:exported="true" />\n    ' + closing,
-                  1,
-              )
-              path.write_text(xml, encoding='utf-8')
-              print(f'Updated manifest: {path}')
-          PY_MANIFEST
-
-          python3 -m py_compile scripts/storage-tests.py scripts/publish-results.py
-          bash -n scripts/run-stage3.sh scripts/run-tests.sh
-          python3 -m json.tool experiments/catalog.json >/dev/null
-          python3 - <<'PY_XML'
-          from pathlib import Path
-          from xml.etree import ElementTree as ET
-          for module in ('owner','client'):
-              path = Path(module)/'src/main/AndroidManifest.xml'
-              tree=ET.parse(path)
-              namespace='{http://schemas.android.com/apk/res/android}'
-              activities=[a.get(namespace+'name') for a in tree.iter('activity')]
-              assert '.StorageProbeActivity' in activities, (module,activities)
-              print('Manifest OK:', path)
-          PY_XML
-
-      - name: Commit only ordinary source and documentation files
+      - name: Create or update Stage 3 source files
         shell: bash
         run: |
           set -euo pipefail
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add -- owner/src/main/AndroidManifest.xml client/src/main/AndroidManifest.xml
-          git add -- owner/src/main/java/org/example/securitylab/owner/StorageProbeActivity.kt
-          git add -- client/src/main/java/org/example/securitylab/client/StorageProbeActivity.kt
-          git add -- scripts/storage-tests.py scripts/run-stage3.sh scripts/run-tests.sh scripts/publish-results.py
-          git add -- experiments/catalog.json experiments/storage.md
-          if git diff --cached --quiet; then
-            echo 'Stage 3 files already current.'
-          else
-            git commit -m 'feat: add Scoped Storage scenarios F1-F3 [skip ci]'
-            git push origin "HEAD:${{ github.event.repository.default_branch }}"
-          fi
+          test -f owner/src/main/AndroidManifest.xml
+          test -f client/src/main/AndroidManifest.xml
+          test -f scripts/run-stage1.sh
+          test -f scripts/run-stage2.sh
+
+          write_managed() {
+            local dest="$1" marker="$2" tmp
+            tmp="$(mktemp)"
+            cat > "$tmp"
+            if [ -f "$dest" ] && ! grep -Fq "$marker" "$dest"; then
+              echo "Refusing to overwrite unmanaged file: $dest" >&2
+              rm -f "$tmp"
+              return 1
+            fi
+            mkdir -p "$(dirname "$dest")"
+            if [ ! -f "$dest" ] || ! cmp -s "$dest" "$tmp"; then
+              mv "$tmp" "$dest"
+              echo "Updated $dest"
+            else
+              rm -f "$tmp"
+              echo "Unchanged $dest"
+            fi
+          }
+
+          write_managed "owner/src/main/java/org/example/securitylab/owner/StorageProbeActivity.kt" 'Managed by project-update.yml' <<'STAGE3_OWNERSTORAGEPROBEACTIVITY_KT'
+          // Managed by project-update.yml - Stage 3
+          package org.example.securitylab.owner
+
+          import android.app.Activity
+          import android.os.Bundle
+          import android.util.Log
+          import android.widget.TextView
+          import org.json.JSONObject
+          import java.io.File
+
+          class StorageProbeActivity : Activity() {
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+                  val expected = "ALLOW"
+                  var observed = "ERROR"
+                  var detail = ""
+                  try {
+                      val dir = getExternalFilesDir(null) ?: error("External app-specific directory is unavailable")
+                      val fixture = File(dir, "ASL_OWNER_EXTERNAL_FIXTURE.txt")
+                      fixture.writeText("ASL_STAGE3_OWNER_FIXTURE")
+                      val content = fixture.readText()
+                      observed = if (content == "ASL_STAGE3_OWNER_FIXTURE") "ALLOW" else "INCORRECT_DATA"
+                      detail = "Read own app-specific external file via getExternalFilesDir"
+                  } catch (e: Exception) {
+                      detail = "${e.javaClass.simpleName}: ${e.message}"
+                  }
+                  val passed = observed == expected
+                  val result = JSONObject()
+                      .put("id", "F1").put("expected", expected)
+                      .put("observed", observed).put("pass", passed)
+                      .put("detail", detail)
+                  Log.i("SecurityLab", "ASL_STORAGE_RESULT:$result")
+                  setContentView(TextView(this).apply {
+                      text = "Storage F1: $observed"
+                      textSize = 23f
+                  })
+              }
+          }
+          STAGE3_OWNERSTORAGEPROBEACTIVITY_KT
+          write_managed "client/src/main/java/org/example/securitylab/client/StorageProbeActivity.kt" 'Managed by project-update.yml' <<'STAGE3_CLIENTSTORAGEPROBEACTIVITY_KT'
+          // Managed by project-update.yml - Stage 3
+          package org.example.securitylab.client
