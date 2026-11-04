@@ -57,3 +57,13 @@
 Подробные JSON-отчёты, журналы и изображения доступны в разделе Artifacts указанного запуска.
 
 <!-- ANDROID_STAGE1_END -->
+
+<!-- RESEARCH_DOCS_LINKS_START -->
+## Документация курсовой работы
+
+- [План курсовой](docs/project-plan.md)
+- [Архитектура испытательного стенда](docs/architecture.md)
+- [Методика: 14 экспериментов](experiments/test-plan.md)
+- [Проект официального задания](docs/course-assignment.md)
+
+<!-- RESEARCH_DOCS_LINKS_END -->
