@@ -1,3 +1,4 @@
+
 name: Android Security Lab - Stage 1 Sandbox IPC
 
 on:
@@ -6,174 +7,118 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: android-stage1-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
-  initialize:
-    name: Create source project in repository
+  prepare:
+    name: Fix existing Kotlin build files
+    if: ${{ github.ref_name == github.event.repository.default_branch }}
     runs-on: ubuntu-24.04
     permissions:
       contents: write
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.ref_name }}
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '17'
-      - uses: gradle/actions/setup-gradle@v6
-        with:
-          gradle-version: '8.13'
-      - name: Create missing Android project files (never overwrite edits)
+
+      - name: Migrate Kotlin compiler settings
         shell: bash
         run: |
-          python3 - <<'PY_CREATE'
-          import json, base64, zlib
+          python3 - <<'PY'
           from pathlib import Path
-          packed = """
-          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
-          """
-          files = json.loads(zlib.decompress(base64.b64decode(packed)).decode('utf-8'))
-          for name, contents in files.items():
-              path = Path(name)
-              if path.exists():
-                  print('Keep existing: ' + name)
-                  continue
-              path.parent.mkdir(parents=True, exist_ok=True)
-              path.write_text(contents, encoding='utf-8')
-              print('Created: ' + name)
-          PY_CREATE
-      - name: Generate official Gradle wrapper once
+
+          old = '    kotlinOptions { jvmTarget = "17" }'
+          new = '''kotlin {
+              compilerOptions {
+                  jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+              }
+          }
+          '''
+
+          for module in ('owner', 'client'):
+              file = Path(module) / 'build.gradle.kts'
+              if not file.is_file():
+                  raise SystemExit(f'Missing build file: {file}')
+              text = file.read_text(encoding='utf-8')
+
+              if old in text:
+                  text = text.replace(old, '', 1).rstrip() + '\n\n' + new
+                  file.write_text(text, encoding='utf-8')
+                  print(f'Updated: {file}')
+              elif ('compilerOptions' in text and 'JvmTarget.JVM_17' in text):
+                  print(f'Already migrated: {file}')
+              else:
+                  raise SystemExit(f'Unknown Kotlin configuration: {file}')
+          PY
+
+      - name: Commit migration (only two Gradle files)
         shell: bash
         run: |
           set -euo pipefail
-          if [ ! -f gradle/wrapper/gradle-wrapper.jar ]; then
-            workdir="$(mktemp -d)"
-            printf 'plugins { base }\n' > "$workdir/build.gradle.kts"
-            (cd "$workdir" && gradle wrapper --gradle-version 8.13)
-            mkdir -p gradle/wrapper
-            cp "$workdir/gradle/wrapper/gradle-wrapper.jar" gradle/wrapper/
-            cp "$workdir/gradle/wrapper/gradle-wrapper.properties" gradle/wrapper/
-            cp "$workdir/gradlew" "$workdir/gradlew.bat" ./
-            chmod +x gradlew
-          fi
-      - name: Commit generated source code
-        shell: bash
-        run: |
-          set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -- settings.gradle.kts build.gradle.kts gradle.properties .gitignore owner client scripts docs/experiments/STAGE1.md gradle gradlew gradlew.bat
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- owner/build.gradle.kts client/build.gradle.kts
           if git diff --cached --quiet; then
-            echo 'No source changes.'
+            echo 'No source changes required.'
           else
-            git commit -m "feat: add Stage 1 Android Sandbox IPC test project [skip ci]"
+            git commit -m 'fix(build): migrate Kotlin compiler options [skip ci]'
             git push origin "HEAD:${{ github.ref_name }}"
           fi
 
   android-tests:
     name: Sandbox IPC / Android API ${{ matrix.api }}
-    needs: initialize
+    needs: prepare
     runs-on: ubuntu-24.04
     timeout-minutes: 55
+
     strategy:
       fail-fast: false
       matrix:
         api: [33, 36]
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout latest source files
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.ref_name }}
-      - uses: actions/setup-java@v4
+
+      - name: Install Java 17
+        uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: '17'
-      - uses: gradle/actions/setup-gradle@v6
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v6
         with:
-          gradle-version: '8.13'
-      - uses: android-actions/setup-android@v4
-      - name: Install Android platform for compilation
-        run: sdkmanager "platforms;android-36" "build-tools;35.0.0"
-      - name: Build SecurityOwner and SecurityClient
+          cache-provider: basic
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v4
+
+      - name: Install Android build platform
+        shell: bash
+        run: sdkmanager 'platforms;android-36' 'build-tools;35.0.0'
+
+      - name: Build the two applications
+        shell: bash
         run: ./gradlew :owner:assembleDebug :client:assembleDebug --no-daemon --stacktrace
-      - name: Enable KVM
+
+      - name: Enable KVM acceleration
+        shell: bash
         run: |
-          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          set -euo pipefail
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
-      - name: Run five experiments in Android Emulator
+          ls -l /dev/kvm
+
+      - name: Run Stage 1 experiments on Android Emulator
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: ${{ matrix.api }}
@@ -182,19 +127,26 @@ jobs:
           ram-size: 2048M
           cores: 2
           script: bash scripts/run-stage1.sh
-      - name: Write run summary
+
+      - name: Summarize test results
         if: always()
         shell: bash
+        env:
+          TEST_API: ${{ matrix.api }}
         run: |
-          if [ -f "results/stage1-api-${{ matrix.api }}/report.json" ]; then
-            echo '### Stage 1 - API ${{ matrix.api }}' >> "$GITHUB_STEP_SUMMARY"
-            echo '```json' >> "$GITHUB_STEP_SUMMARY"
-            cat "results/stage1-api-${{ matrix.api }}/report.json" >> "$GITHUB_STEP_SUMMARY"
-            echo '```' >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo 'Stage 1 API ${{ matrix.api }}: report not created; inspect build/emulator logs.' >> "$GITHUB_STEP_SUMMARY"
-          fi
-      - name: Upload test evidence
+          report="results/stage1-api-${TEST_API}/report.json"
+          {
+            echo "### Stage 1, Android API ${TEST_API}"
+            if [ -f "$report" ]; then
+              echo '```json'
+              cat "$report"
+              echo '```'
+            else
+              echo 'No report was generated. Inspect the failed build or emulator step.'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload logs and screenshots
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -205,107 +157,143 @@ jobs:
 
   publish-readme:
     name: Publish Stage 1 results to README
-    needs: [initialize, android-tests]
-    if: ${{ always() && needs.initialize.result == 'success' && github.ref_name == github.event.repository.default_branch }}
+    needs: [prepare, android-tests]
+    if: ${{ always() && needs.prepare.result == 'success' && github.ref_name == github.event.repository.default_branch }}
     runs-on: ubuntu-24.04
     permissions:
       contents: write
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.ref_name }}
-      - uses: actions/download-artifact@v4
+
+      - name: Download this run's test reports
+        uses: actions/download-artifact@v4
         continue-on-error: true
         with:
           pattern: securitylab-api-*
           path: downloaded
-      - name: Generate README section and copy screenshots
+          merge-multiple: false
+
+      - name: Update only the Stage 1 section in README
         shell: bash
         run: |
-          python3 - <<'PY_PUBLISH'
-          import json, os, shutil
+          python3 - <<'PY'
+          import json
+          import os
+          import shutil
           from datetime import datetime, timezone
           from pathlib import Path
-          start='<!-- ANDROID_STAGE1_START -->'
-          end='<!-- ANDROID_STAGE1_END -->'
-          readme=Path('README.md')
-          images=Path('docs/screenshots')
-          images.mkdir(parents=True, exist_ok=True)
-          reports={}
-          rows=[]
-          for api, version in ((33,'13'),(36,'16')):
-              folder=Path('downloaded')/f'securitylab-api-{api}'
-              report=folder/'report.json'
-              try:
-                  data=json.loads(report.read_text(encoding='utf-8'))
-              except (OSError,ValueError):
-                  data=None
-              reports[api]=data
-              for kind in ('owner','client'):
-                  dest=images/f'stage1-android-{version}-{kind}.png'
-                  source=folder/f'{kind}.png'
-                  if data and source.is_file() and source.read_bytes().startswith(b'\x89PNG\r\n\x1a\n'):
-                      shutil.copyfile(source,dest)
-                  else:
-                      dest.unlink(missing_ok=True)
-          lines=[start,'## Эксперименты: изоляция приложений и IPC','',
-              'Данные получены при автоматизированном запуске двух обычных приложений в Android Emulator.',
-              f'Обновлено: {datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")}.',
-              f'[Открыть запуск GitHub Actions]({os.environ["GITHUB_SERVER_URL"]}/{os.environ["GITHUB_REPOSITORY"]}/actions/runs/{os.environ["GITHUB_RUN_ID"]}).','',
-              '| Сценарий | Android 13 (API 33) | Android 16 (API 36) |','|---|---|---|']
-          descriptions={
-              'S1':'Owner читает собственный приватный файл',
-              'S2':'Client пытается напрямую читать приватный файл Owner',
-              'S3':'Client обращается к закрытому ContentProvider',
-              'S4':'Client обращается к открытому ContentProvider',
-              'S5':'Client обращается к Provider с signature-разрешением'
+
+          start = '<!-- ANDROID_STAGE1_START -->'
+          end = '<!-- ANDROID_STAGE1_END -->'
+          readme = Path('README.md')
+          screenshots = Path('docs/screenshots')
+          screenshots.mkdir(parents=True, exist_ok=True)
+
+          tests = {
+              'S1': 'Owner читает собственный приватный файл',
+              'S2': 'Client пытается прочитать приватный файл Owner',
+              'S3': 'Client обращается к закрытому ContentProvider',
+              'S4': 'Client обращается к открытому ContentProvider',
+              'S5': 'Client обращается к Provider с signature-разрешением',
           }
-          def status(api, key):
-              data=reports[api]
-              if not data: return 'НЕТ ОТЧЁТА'
-              result=next((item for item in data.get('results',[]) if item.get('id')==key),None)
-              if not result: return 'НЕ ВЫПОЛНЕН'
-              observed=str(result.get('observed','?')).replace('|','/')
-              return ('PASS' if result.get('pass') else 'FAIL')+' ('+observed+')'
-          for key, desc in descriptions.items():
-              lines.append(f'| **{key}** — {desc} | {status(33,key)} | {status(36,key)} |')
-          overall=[reports[api].get('status','FAIL') if reports[api] else 'NO REPORT' for api in (33,36)]
-          lines.extend(['',f'**Итог:** Android 13 — {overall[0]}; Android 16 — {overall[1]}.','',
-              '### Фактические скриншоты приложений','',
-              '| Android 13 | Android 16 |','|---|---|'])
-          for kind,label in [('owner','SecurityOwner'),('client','SecurityClient')]:
-              cells=[]
-              for version in ('13','16'):
-                  image=f'docs/screenshots/stage1-android-{version}-{kind}.png'
-                  cells.append(f'<img src="{image}" width="240" alt="{label} Android {version}">' if Path(image).is_file() else 'Нет изображения')
-              lines.append(f'| {cells[0]} | {cells[1]} |')
-          lines.extend(['',
-              '> Это результаты испытаний **виртуальных устройств**, а не физического смартфона. '
-              'Проверка S2 подтверждается только при наличии исходного файла у Owner; '
-              'проверка S4 используется как положительный контроль для IPC.',
+
+          reports = {}
+          pictures = {}
+          for api, android in [(33, '13'), (36, '16')]:
+              folder = Path('downloaded') / f'securitylab-api-{api}'
+              try:
+                  reports[api] = json.loads((folder / 'report.json').read_text(encoding='utf-8'))
+              except (OSError, ValueError):
+                  reports[api] = None
+
+              for kind in ('owner', 'client'):
+                  src = folder / f'{kind}.png'
+                  dest = screenshots / f'stage1-android-{android}-{kind}.png'
+                  if reports[api] and src.is_file() and src.read_bytes().startswith(b'\x89PNG\r\n\x1a\n'):
+                      shutil.copyfile(src, dest)
+                      pictures[(api, kind)] = f'<img src="{dest.as_posix()}" width="240" alt="{kind}, Android {android}">'
+                  else:
+                      # Do not show an old screenshot as evidence for a new run.
+                      pictures[(api, kind)] = 'Скриншот отсутствует'
+
+          def show(api, experiment):
+              report = reports[api]
+              if not report:
+                  return 'НЕТ ОТЧЁТА'
+              record = next((r for r in report.get('results', []) if r.get('id') == experiment), None)
+              if not record:
+                  return 'НЕ ВЫПОЛНЕН'
+              observed = str(record.get('observed', '?')).replace('|', '/').replace('\n', ' ')
+              return ('PASS' if record.get('pass') is True else 'FAIL') + f' ({observed})'
+
+          now = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
+          run_url = (
+              f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}"
+              f"/actions/runs/{os.environ['GITHUB_RUN_ID']}"
+          )
+          lines = [
+              start,
+              '## Эксперименты: Application Sandbox и IPC',
               '',
-              'Подробные JSON-отчёты, журналы и изображения доступны в разделе Artifacts указанного запуска.',
-              '',end])
-          section='\n'.join(lines)
-          original=readme.read_text(encoding='utf-8') if readme.is_file() else '# Android Security Research Lab\n'
+              f'Обновлено: **{now}**. [Запуск GitHub Actions]({run_url}).',
+              '',
+              '| Сценарий | Android 13 (API 33) | Android 16 (API 36) |',
+              '|---|---|---|',
+          ]
+          for test_id, title in tests.items():
+              lines.append(f'| **{test_id}** — {title} | {show(33, test_id)} | {show(36, test_id)} |')
+
+          def overall(api):
+              return str(reports[api].get('status', 'UNKNOWN')) if reports[api] else 'NO REPORT'
+
+          lines.extend([
+              '',
+              f'**Итог:** Android 13 — {overall(33)}; Android 16 — {overall(36)}.',
+              '',
+              '### Скриншоты последнего запуска',
+              '',
+              '| Приложение | Android 13 | Android 16 |',
+              '|---|---|---|',
+          ])
+          for kind, title in [('owner', 'SecurityOwner'), ('client', 'SecurityClient')]:
+              lines.append(f'| {title} | {pictures[(33, kind)]} | {pictures[(36, kind)]} |')
+          lines.extend([
+              '',
+              '> Данные получены из Android Emulator; аппаратные механизмы защиты смартфона здесь не проверяются.',
+              '> Отсутствующий отчёт не считается успешным экспериментом. Полные журналы доступны в Artifacts запуска.',
+              '',
+              end,
+          ])
+          block = '\n'.join(lines)
+          original = readme.read_text(encoding='utf-8') if readme.is_file() else '# Android Security Lab\n'
+
           if start in original and end in original:
-              before,following=original.split(start,1)
-              _,after=following.split(end,1)
-              new=before.rstrip()+'\n\n'+section+after
+              before, remainder = original.split(start, 1)
+              _, after = remainder.split(end, 1)
+              updated = before.rstrip() + '\n\n' + block + after
           elif start not in original and end not in original:
-              new=original.rstrip()+'\n\n'+section+'\n'
+              updated = original.rstrip() + '\n\n' + block + '\n'
           else:
-              raise RuntimeError('README has only one stage1 section marker')
-          readme.write_text(new.rstrip()+'\n',encoding='utf-8')
-          PY_PUBLISH
-      - name: Commit README and screenshots
+              raise SystemExit('README has incomplete Stage 1 markers; refusing to overwrite it.')
+
+          readme.write_text(updated.rstrip() + '\n', encoding='utf-8')
+          PY
+
+      - name: Commit README and current screenshots
         shell: bash
         run: |
           set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A -- README.md docs/screenshots/
-          if ! git diff --cached --quiet; then
-            git commit -m "docs: publish Android Sandbox IPC evidence [skip ci]"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- README.md
+          git add -A -- docs/screenshots/
+          if git diff --cached --quiet; then
+            echo 'No README changes.'
+          else
+            git commit -m 'docs: publish Stage 1 test results [skip ci]'
             git push origin "HEAD:${{ github.ref_name }}"
           fi
