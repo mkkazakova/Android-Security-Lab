@@ -1,0 +1,294 @@
+
+name: Android Security Lab - Update Project (Stage 2)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-security-project-update
+  cancel-in-progress: false
+
+jobs:
+  update-project:
+    name: Add Runtime Permissions experiments P1-P3
+    if: ${{ github.ref_name == github.event.repository.default_branch }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout default branch
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+
+      - name: Update source code and test launcher
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY_UPDATE'
+          from pathlib import Path
+          from textwrap import dedent
+          import re
+
+          client = Path('client/src/main')
+          manifest = client / 'AndroidManifest.xml'
+          activity = client / 'java/org/example/securitylab/client/PermissionProbeActivity.kt'
+          runner = Path('scripts/run-stage2.sh')
+          workflow = Path('.github/workflows/android-security-stage1.yml')
+          doc = Path('experiments/permissions.md')
+
+          for path in (manifest, workflow, Path('scripts/run-stage1.sh')):
+              if not path.is_file():
+                  raise SystemExit(f'Missing Stage 1 file: {path}. No files will be committed.')
+
+          def save_owned(path, content, marker):
+              if path.exists() and marker not in path.read_text(encoding='utf-8'):
+                  raise SystemExit(f'Refusing to overwrite unrecognized file: {path}')
+              path.parent.mkdir(parents=True, exist_ok=True)
+              if not path.exists() or path.read_text(encoding='utf-8') != content:
+                  path.write_text(content, encoding='utf-8')
+                  print(f'Updated: {path}')
+              else:
+                  print(f'Unchanged: {path}')
+
+          kotlin = dedent(r'''
+          // Managed by project-update.yml — Stage 2: Runtime Permissions
+          package org.example.securitylab.client
+
+          import android.Manifest
+          import android.app.Activity
+          import android.content.pm.PackageManager
+          import android.os.Bundle
+          import android.util.Log
+          import android.widget.TextView
+          import org.json.JSONObject
+
+          class PermissionProbeActivity : Activity() {
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+
+                  val testId = intent.getStringExtra("experiment_id") ?: "UNKNOWN"
+                  val expected = if (testId == "P2") "ALLOW" else "DENY"
+                  val granted = checkSelfPermission(Manifest.permission.CAMERA) ==
+                      PackageManager.PERMISSION_GRANTED
+                  val observed = if (granted) "ALLOW" else "DENY"
+                  val passed = testId in setOf("P1", "P2", "P3") && observed == expected
+
+                  val result = JSONObject()
+                      .put("id", testId)
+                      .put("expected", expected)
+                      .put("observed", observed)
+                      .put("pass", passed)
+                      .put("detail", "CAMERA state read using checkSelfPermission inside the client app")
+                  Log.i("SecurityLab", "ASL_PERMISSION_RESULT:$result")
+
+                  setContentView(TextView(this).apply {
+                      text = "Runtime Permissions\n$testId: $observed\n" +
+                          (if (passed) "PASS" else "FAIL")
+                      textSize = 23f
+                      setPadding(32, 48, 20, 20)
+                  })
+              }
+          }
+          ''').strip() + '\n'
+          save_owned(activity, kotlin, '// Managed by project-update.yml')
+
+          xml = manifest.read_text(encoding='utf-8')
+          if 'android.permission.CAMERA' not in xml:
+              needle = '<application '
+              if needle not in xml:
+                  raise SystemExit('Unexpected client manifest structure: application tag missing')
+              xml = xml.replace(needle,
+                  '<uses-permission android:name="android.permission.CAMERA" />\n    ' + needle, 1)
+          if 'android:name=".PermissionProbeActivity"' not in xml:
+              needle = '</application>'
+              if needle not in xml:
+                  raise SystemExit('Unexpected client manifest structure: application ending missing')
+              xml = xml.replace(needle,
+                  '    <activity android:name=".PermissionProbeActivity" android:exported="true" />\n    ' + needle, 1)
+          if manifest.read_text(encoding='utf-8') != xml:
+              manifest.write_text(xml, encoding='utf-8')
+              print(f'Updated: {manifest}')
+
+          bash = dedent(r'''
+          #!/usr/bin/env bash
+          # Managed by project-update.yml — Stage 2: Runtime Permissions
+          set -euo pipefail
+
+          # Preserve the five existing Sandbox/IPC experiments.
+          bash scripts/run-stage1.sh
+
+          # Add P1-P3 to the same report, from inside SecurityClient.
+          python3 - <<'PY_PERMISSIONS'
+          import json
+          import re
+          import subprocess
+          import sys
+          import time
+          from pathlib import Path
+
+          pkg = 'org.example.securitylab.client'
+          perm = 'android.permission.CAMERA'
+          api = subprocess.check_output(
+              ['adb', 'shell', 'getprop', 'ro.build.version.sdk'], text=True
+          ).strip()
+          folder = Path('results') / f'stage1-api-{api}'
+          report_path = folder / 'report.json'
+          report = json.loads(report_path.read_text(encoding='utf-8'))
+          observations = []
+          all_logs = []
+
+          def adb(*arguments, timeout=35):
+              command = ['adb', *arguments]
+              result = subprocess.run(
+                  command, capture_output=True, text=True, timeout=timeout
+              )
+              if result.returncode:
+                  raise RuntimeError(
+                      f'{" ".join(command)}: {result.stderr.strip() or result.stdout.strip()}'
+                  )
+              return result.stdout
+
+          def check(test_id, change):
+              expected = 'ALLOW' if test_id == 'P2' else 'DENY'
+              try:
+                  adb('shell', 'am', 'force-stop', pkg)
+                  adb('shell', 'pm', change, pkg, perm)
+                  adb('logcat', '-c')
+                  adb(
+                      'shell', 'am', 'start', '-W', '-n',
+                      f'{pkg}/.PermissionProbeActivity',
+                      '--es', 'experiment_id', test_id,
+                  )
+                  found = None
+                  last_log = ''
+                  for _ in range(30):
+                      last_log = adb('logcat', '-d', '-v', 'raw', '-s', 'SecurityLab:I', '*:S')
+                      for line in last_log.splitlines():
+                          match = re.search(r'ASL_PERMISSION_RESULT:(\{.*\})', line)
+                          if match:
+                              candidate = json.loads(match.group(1))
+                              if candidate.get('id') == test_id:
+                                  found = candidate
+                                  break
+                      if found is not None:
+                          break
+                      time.sleep(1)
+                  all_logs.append(f'=== {test_id} ===\n{last_log}')
+                  if found is None:
+                      raise RuntimeError('No application-side result received in 30 seconds')
+                  if found.get('expected') != expected:
+                      raise RuntimeError('Application returned an inconsistent expected result')
+                  return found
+              except Exception as exc:
+                  return {
+                      'id': test_id, 'expected': expected, 'observed': 'ERROR',
+                      'pass': False, 'detail': str(exc)[:500],
+                  }
+
+          # Control the state using ADB; evaluate it using the app's own API.
+          for test_id, operation in [('P1', 'revoke'), ('P2', 'grant'), ('P3', 'revoke')]:
+              result = check(test_id, operation)
+              observations.append(result)
+              print(json.dumps(result, ensure_ascii=False))
+
+          (folder / 'permission-logcat.txt').write_text(
+              '\n\n'.join(all_logs) + '\n', encoding='utf-8'
+          )
+          report['stage'] = 'sandbox_ipc_runtime_permissions'
+          report['permissions_control_method'] = 'ADB pm grant/revoke; checkSelfPermission in app'
+          report['results'].extend(observations)
+          report['status'] = ('PASS' if report.get('status') == 'PASS'
+                              and all(r.get('pass') is True for r in observations)
+                              else 'FAIL')
+          report_path.write_text(
+              json.dumps(report, ensure_ascii=False, indent=2) + '\n', encoding='utf-8'
+          )
+          if report['status'] != 'PASS':
+              sys.exit('Stage 2 contains failed or inconclusive checks; inspect report.json')
+          PY_PERMISSIONS
+          ''').strip() + '\n'
+          save_owned(runner, bash, '# Managed by project-update.yml')
+
+          text = workflow.read_text(encoding='utf-8')
+          old_command = 'script: bash scripts/run-stage1.sh'
+          new_command = 'script: bash scripts/run-stage2.sh'
+          if old_command in text:
+              text = text.replace(old_command, new_command, 1)
+          elif new_command not in text:
+              raise SystemExit(f'Cannot find emulator script invocation in {workflow}')
+
+          old_name = 'name: Android Security Lab - Stage 1 Sandbox IPC'
+          if old_name in text:
+              text = text.replace(old_name,
+                  'name: Android Security Lab - Sandbox IPC and Runtime Permissions', 1)
+          old_heading = '## Эксперименты: Application Sandbox и IPC'
+          if old_heading in text:
+              text = text.replace(old_heading,
+                  '## Эксперименты: Sandbox, IPC и Runtime Permissions', 1)
+
+          if "'P1':" not in text:
+              pattern = r"(?m)^([ \t]*)'S5': [^\n]+\n"
+              match = re.search(pattern, text)
+              if not match:
+                  raise SystemExit('Cannot find the S5 entry in the README test table')
+              indent = match.group(1)
+              extra = (
+                  f"{indent}'P1': 'Разрешение CAMERA отсутствует',\n"
+                  f"{indent}'P2': 'Разрешение CAMERA выдано',\n"
+                  f"{indent}'P3': 'Разрешение CAMERA отозвано',\n"
+              )
+              text = text[:match.end()] + extra + text[match.end():]
+          if workflow.read_text(encoding='utf-8') != text:
+              workflow.write_text(text, encoding='utf-8')
+              print(f'Updated: {workflow}')
+
+          md = dedent('''
+          <!-- Managed by project-update.yml: Stage 2 -->
+          # Runtime Permissions: методика P1–P3
+
+          Проверяется состояние опасного разрешения `android.permission.CAMERA`
+          в обычном приложении `SecurityClient` на Android 13 и Android 16.
+          Изображение с камеры не запрашивается.
+
+          | ID | Подготовка через ADB | Проверка из приложения | Ожидаемый результат |
+          |---|---|---|---|
+          | P1 | `pm revoke` | `checkSelfPermission(CAMERA)` | DENY |
+          | P2 | `pm grant` | `checkSelfPermission(CAMERA)` | ALLOW |
+          | P3 | `pm revoke` после P2 | `checkSelfPermission(CAMERA)` | DENY |
+
+          `pm grant`/`pm revoke` применяется только для изменения условий теста.
+          Итоговое наблюдение регистрируется в самом приложении, а не подменяется
+          выводом ADB. Отзыв разрешения может завершить процесс приложения,
+          поэтому каждый сценарий запускает отдельную Activity заново.
+
+          **Ограничение:** это исследование применения runtime permissions,
+          а не тестирование пользовательских диалогов выдачи доступа и не
+          подтверждение работоспособности камеры.
+          ''').strip() + '\n'
+          save_owned(doc, md, '<!-- Managed by project-update.yml: Stage 2 -->')
+
+          print('Stage 2 source update is ready. Next: run the Sandbox IPC workflow.')
+          PY_UPDATE
+
+      - name: Commit only files managed by Stage 2
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- \
+            client/src/main/AndroidManifest.xml \
+            client/src/main/java/org/example/securitylab/client/PermissionProbeActivity.kt \
+            scripts/run-stage2.sh \
+            experiments/permissions.md \
+            .github/workflows/android-security-stage1.yml
+          if git diff --cached --quiet; then
+            echo 'Stage 2 is already up to date.'
+          else
+            git commit -m 'feat: add runtime permission experiments P1-P3 [skip ci]'
+            git push origin "HEAD:${{ github.event.repository.default_branch }}"
+          fi
