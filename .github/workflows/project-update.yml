@@ -1,465 +1,142 @@
-
-name: Android Security Lab - Update Project (Stage 2)
-
-on:
-  workflow_dispatch:
-
-permissions:
-  contents: write
-
-concurrency:
-  group: android-security-project-update
-  cancel-in-progress: false
-
-jobs:
-  update-project:
-    name: Add Runtime Permissions experiments P1-P3
-    if: ${{ github.ref_name == github.event.repository.default_branch }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-
-    steps:
-      - name: Checkout default branch
-        uses: actions/checkout@v6
-        with:
-          ref: ${{ github.event.repository.default_branch }}
-
-      - name: Update source code and test launcher
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          python3 - <<'PY_UPDATE'
-          from pathlib import Path
-          from textwrap import dedent
-
-          client = Path('client/src/main')
-          manifest = client / 'AndroidManifest.xml'
-          activity = client / 'java/org/example/securitylab/client/PermissionProbeActivity.kt'
-          runner = Path('scripts/run-stage2.sh')
-          doc = Path('experiments/permissions.md')
-
-          for path in (manifest, Path('scripts/run-stage1.sh')):
-              if not path.is_file():
-                  raise SystemExit(f'Missing Stage 1 file: {path}')
-
-          def save_owned(path, content, marker):
-              if path.exists():
-                  current = path.read_text(encoding='utf-8')
-                  if marker not in current:
-                      raise SystemExit(
-                          f'Refusing to overwrite unrecognized file: {path}'
-                      )
-                  if current == content:
-                      print(f'Unchanged: {path}')
-                      return
-
-              path.parent.mkdir(parents=True, exist_ok=True)
-              path.write_text(content, encoding='utf-8')
-              print(f'Updated: {path}')
-
-          kotlin = dedent(r'''
-          // Managed by project-update.yml - Stage 2
-          package org.example.securitylab.client
-
-          import android.Manifest
-          import android.app.Activity
-          import android.content.pm.PackageManager
-          import android.os.Bundle
-          import android.util.Log
-          import android.widget.TextView
-          import org.json.JSONObject
-
-          class PermissionProbeActivity : Activity() {
-              override fun onCreate(savedInstanceState: Bundle?) {
-                  super.onCreate(savedInstanceState)
-
-                  val testId =
-                      intent.getStringExtra("experiment_id") ?: "UNKNOWN"
-
-                  val expected =
-                      if (testId == "P2") "ALLOW" else "DENY"
-
-                  val granted =
-                      checkSelfPermission(Manifest.permission.CAMERA) ==
-                          PackageManager.PERMISSION_GRANTED
-
-                  val observed =
-                      if (granted) "ALLOW" else "DENY"
-
-                  val passed =
-                      testId in setOf("P1", "P2", "P3") &&
-                          observed == expected
-
-                  val result = JSONObject()
-                      .put("id", testId)
-                      .put("expected", expected)
-                      .put("observed", observed)
-                      .put("pass", passed)
-                      .put(
-                          "detail",
-                          "CAMERA state checked inside SecurityClient"
-                      )
-
-                  Log.i(
-                      "SecurityLab",
-                      "ASL_PERMISSION_RESULT:$result"
-                  )
-
-                  setContentView(TextView(this).apply {
-                      text = "Runtime Permissions\n" +
-                          "$testId: $observed\n" +
-                          (if (passed) "PASS" else "FAIL")
-
-                      textSize = 23f
-                      setPadding(32, 48, 20, 20)
-                  })
-              }
+              '',
+              f'**Сводный статус:** Android 13 — {total(33)}; Android 16 — {total(36)}.',
+              '',
+              '### Наблюдения и интерпретация',
+              '',
+              '| Сценарий | Android 13: наблюдение | Android 16: наблюдение |',
+              '|---|---|---|',
+          ])
+          for test in TESTS:
+              tid = test['id']
+              lines.append(f"| {tid} | {row_for(33, tid)[1]} | {row_for(36, tid)[1]} |")
+          lines.extend([
+              '',
+              '### Скриншоты из Android Emulator',
+              '',
+              '| Материал | Android 13 | Android 16 |',
+              '|---|---|---|',
+          ])
+          for kind, label in (('owner', 'SecurityOwner'), ('client', 'SecurityClient'), ('f3-picker', 'Системный выбор документа F3')):
+              lines.append(f"| {label} | {screenshots[(33, kind)]} | {screenshots[(36, kind)]} |")
+          lines.extend([
+              '',
+              '> PASS означает совпадение наблюдаемого поведения с гипотезой, в том числе при отказе в доступе. ',
+              '> Инфраструктурная ошибка не считается подтверждением механизма безопасности. ',
+              '> Тесты выполняются в эмуляторах, без выводов об аппаратной защите физического смартфона.',
+              '',
+              'Подробные машинно-читаемые данные находятся в [`results/`](results/), а журналы и дополнительные файлы — в Artifacts запуска.',
+              '',
+              END,
+          ])
+          block = '\n'.join(lines)
+          original = README.read_text(encoding='utf-8') if README.is_file() else '# Android Security Lab\n'
+          if START in original and END in original:
+              before, remainder = original.split(START, 1)
+              _, after = remainder.split(END, 1)
+              updated = before.rstrip() + '\n\n' + block + after
+          elif START not in original and END not in original:
+              updated = original.rstrip() + '\n\n' + block + '\n'
+          else:
+              raise SystemExit('README has one missing management marker; no replacement performed')
+          README.write_text(updated.rstrip() + '\n', encoding='utf-8')
+          (RESULTS / 'summary.json').write_text(json.dumps({
+              'generated_at_utc': when,
+              'workflow_run_url': url,
+              'expected_scenarios': [x['id'] for x in TESTS],
+              'api_33': total(33),
+              'api_36': total(36),
+          }, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+          print('Published', len(TESTS), 'unique scenarios: Android 13', total(33), '/ Android 16', total(36))
+          STAGE3_PUBLISH_RESULTS_PY
+          write_managed "experiments/catalog.json" '"managed_by": "project-update.yml"' <<'STAGE3_CATALOG_JSON'
+          {
+            "managed_by": "project-update.yml",
+            "experiments": [
+              {"id": "S1", "title": "Владелец читает собственный приватный файл"},
+              {"id": "S2", "title": "Другой UID не читает приватный файл"},
+              {"id": "S3", "title": "Закрытый ContentProvider отклоняет запрос"},
+              {"id": "S4", "title": "Открытый ContentProvider предоставляет данные"},
+              {"id": "S5", "title": "ContentProvider защищён разрешением"},
+              {"id": "P1", "title": "CAMERA: разрешение отсутствует"},
+              {"id": "P2", "title": "CAMERA: разрешение выдано"},
+              {"id": "P3", "title": "CAMERA: разрешение отозвано"},
+              {"id": "F1", "title": "Владелец читает свой app-specific внешний файл"},
+              {"id": "F2", "title": "Другому приложению запрещён прямой доступ к app-specific файлу"},
+              {"id": "F3", "title": "Доступ к документу через системный выбор файла"}
+            ]
           }
-          ''').strip() + '\n'
+          STAGE3_CATALOG_JSON
+          write_managed "experiments/storage.md" 'Managed by project-update.yml' <<'STAGE3_STORAGE_MD'
+          <!-- Managed by project-update.yml - Stage 3 -->
+          # Scoped Storage: методика F1–F3
 
-          save_owned(
-              activity,
-              kotlin,
-              '// Managed by project-update.yml'
-          )
+          Исследуются ограничения доступа к файлам на Android 13 и Android 16 при фиксированном `targetSdk=33`.
 
-          xml = manifest.read_text(encoding='utf-8')
+          | ID | Действие | Ожидается |
+          |---|---|---|
+          | F1 | Owner создаёт и читает тестовый файл в `getExternalFilesDir(null)` | ALLOW |
+          | F2 | Client напрямую читает этот файл по пути `/storage/emulated/0/Android/data/<owner>/files/...` | DENY |
+          | F3 | Client вызывает `ACTION_OPEN_DOCUMENT`, выбирает синтетический документ в системном интерфейсе, затем читает выданный URI | ALLOW |
 
-          if 'android.permission.CAMERA' not in xml:
-              needle = '<application '
+          F1 является положительным контролем для F2: при его провале отрицательный тест не считается подтверждённым. Содержание файлов синтетическое, персональные данные не используются.
 
-              if needle not in xml:
-                  raise SystemExit(
-                      'Unexpected AndroidManifest.xml structure'
-                  )
+          F3 действительно использует системный документный интерфейс Android, а не напрямую предоставленный из ADB URI. ADB используется только для подготовки тестового файла в папке Download и автоматизации нажатия на элемент интерфейса. Ошибка UI-автоматизации фиксируется как ERROR/FAIL, не как ошибка безопасности Android.
 
-              xml = xml.replace(
-                  needle,
-                  '<uses-permission android:name="android.permission.CAMERA" />\n    '
-                  + needle,
-                  1
-              )
+          На эмуляторах не проверяется защита физической флеш-памяти и аппаратные механизмы.
 
-          if 'android:name=".PermissionProbeActivity"' not in xml:
-              needle = '</application>'
-
-              if needle not in xml:
-                  raise SystemExit(
-                      'Missing application closing tag'
-                  )
-
-              xml = xml.replace(
-                  needle,
-                  '    <activity '
-                  'android:name=".PermissionProbeActivity" '
-                  'android:exported="true" />\n    '
-                  + needle,
-                  1
-              )
-
-          if manifest.read_text(encoding='utf-8') != xml:
-              manifest.write_text(xml, encoding='utf-8')
-              print(f'Updated: {manifest}')
-
-          bash = dedent(r'''
-          #!/usr/bin/env bash
-          # Managed by project-update.yml - Stage 2
-
-          set -euo pipefail
-
-          # Execute existing Sandbox and IPC tests (S1-S5).
-          bash scripts/run-stage1.sh
-
-          # Execute Runtime Permissions tests (P1-P3).
-          python3 - <<'PY_PERMISSIONS'
-          import json
-          import re
-          import subprocess
-          import sys
-          import time
+          Документация: https://developer.android.com/about/versions/11/privacy/storage ; https://developer.android.com/training/data-storage/shared/documents-files
+          STAGE3_STORAGE_MD
+          python3 - <<'PY_MANIFEST'
           from pathlib import Path
 
-          pkg = 'org.example.securitylab.client'
-          perm = 'android.permission.CAMERA'
-
-          api = subprocess.check_output(
-              [
-                  'adb',
-                  'shell',
-                  'getprop',
-                  'ro.build.version.sdk'
-              ],
-              text=True
-          ).strip()
-
-          folder = Path('results') / f'stage1-api-{api}'
-          report_path = folder / 'report.json'
-
-          report = json.loads(
-              report_path.read_text(encoding='utf-8')
-          )
-
-          observations = []
-          all_logs = []
-
-          def adb(*arguments, timeout=35):
-              command = ['adb', *arguments]
-
-              result = subprocess.run(
-                  command,
-                  capture_output=True,
-                  text=True,
-                  timeout=timeout
+          for module in ('owner', 'client'):
+              path = Path(module) / 'src/main/AndroidManifest.xml'
+              xml = path.read_text(encoding='utf-8')
+              name = '.StorageProbeActivity'
+              if f'android:name="{name}"' in xml:
+                  print(f'Already declared: {module} StorageProbeActivity')
+                  continue
+              closing = '</application>'
+              if xml.count(closing) != 1:
+                  raise SystemExit(f'Unexpected manifest structure: {path}')
+              xml = xml.replace(
+                  closing,
+                  '        <activity android:name=".StorageProbeActivity" android:exported="true" />\n    ' + closing,
+                  1,
               )
+              path.write_text(xml, encoding='utf-8')
+              print(f'Updated manifest: {path}')
+          PY_MANIFEST
 
-              if result.returncode:
-                  raise RuntimeError(
-                      f'{" ".join(command)}: '
-                      f'{result.stderr.strip() or result.stdout.strip()}'
-                  )
+          python3 -m py_compile scripts/storage-tests.py scripts/publish-results.py
+          bash -n scripts/run-stage3.sh scripts/run-tests.sh
+          python3 -m json.tool experiments/catalog.json >/dev/null
+          python3 - <<'PY_XML'
+          from pathlib import Path
+          from xml.etree import ElementTree as ET
+          for module in ('owner','client'):
+              path = Path(module)/'src/main/AndroidManifest.xml'
+              tree=ET.parse(path)
+              namespace='{http://schemas.android.com/apk/res/android}'
+              activities=[a.get(namespace+'name') for a in tree.iter('activity')]
+              assert '.StorageProbeActivity' in activities, (module,activities)
+              print('Manifest OK:', path)
+          PY_XML
 
-              return result.stdout
-
-          def check(test_id, operation):
-              expected = (
-                  'ALLOW' if test_id == 'P2' else 'DENY'
-              )
-
-              try:
-                  # Stop the previous application process.
-                  adb(
-                      'shell',
-                      'am',
-                      'force-stop',
-                      pkg
-                  )
-
-                  # Prepare permission state.
-                  adb(
-                      'shell',
-                      'pm',
-                      operation,
-                      pkg,
-                      perm
-                  )
-
-                  # Clear logs before this experiment.
-                  adb('logcat', '-c')
-
-                  # Start the permission probe.
-                  adb(
-                      'shell',
-                      'am',
-                      'start',
-                      '-W',
-                      '-n',
-                      f'{pkg}/.PermissionProbeActivity',
-                      '--es',
-                      'experiment_id',
-                      test_id
-                  )
-
-                  found = None
-                  last_log = ''
-
-                  for _ in range(30):
-                      last_log = adb(
-                          'logcat',
-                          '-d',
-                          '-v',
-                          'raw',
-                          '-s',
-                          'SecurityLab:I',
-                          '*:S'
-                      )
-
-                      for line in last_log.splitlines():
-                          match = re.search(
-                              r'ASL_PERMISSION_RESULT:(\{.*\})',
-                              line
-                          )
-
-                          if not match:
-                              continue
-
-                          candidate = json.loads(
-                              match.group(1)
-                          )
-
-                          if candidate.get('id') == test_id:
-                              found = candidate
-                              break
-
-                      if found is not None:
-                          break
-
-                      time.sleep(1)
-
-                  all_logs.append(
-                      f'=== {test_id} ===\n{last_log}'
-                  )
-
-                  if found is None:
-                      raise RuntimeError(
-                          'No application result received'
-                      )
-
-                  if found.get('expected') != expected:
-                      raise RuntimeError(
-                          'Inconsistent expected result'
-                      )
-
-                  return found
-
-              except Exception as exc:
-                  return {
-                      'id': test_id,
-                      'expected': expected,
-                      'observed': 'ERROR',
-                      'pass': False,
-                      'detail': str(exc)[:500]
-                  }
-
-          scenarios = [
-              ('P1', 'revoke'),
-              ('P2', 'grant'),
-              ('P3', 'revoke')
-          ]
-
-          for test_id, operation in scenarios:
-              result = check(test_id, operation)
-
-              observations.append(result)
-
-              print(
-                  json.dumps(
-                      result,
-                      ensure_ascii=False
-                  )
-              )
-
-          (folder / 'permission-logcat.txt').write_text(
-              '\n\n'.join(all_logs) + '\n',
-              encoding='utf-8'
-          )
-
-          report['stage'] = (
-              'sandbox_ipc_runtime_permissions'
-          )
-
-          report['permissions_control_method'] = (
-              'ADB pm grant/revoke; '
-              'checkSelfPermission inside application'
-          )
-
-          report['results'].extend(observations)
-
-          report['status'] = (
-              'PASS'
-              if report.get('status') == 'PASS'
-              and all(
-                  r.get('pass') is True
-                  for r in observations
-              )
-              else 'FAIL'
-          )
-
-          report_path.write_text(
-              json.dumps(
-                  report,
-                  ensure_ascii=False,
-                  indent=2
-              ) + '\n',
-              encoding='utf-8'
-          )
-
-          if report['status'] != 'PASS':
-              sys.exit(
-                  'Stage 2 checks failed. '
-                  'Inspect report.json.'
-              )
-
-          PY_PERMISSIONS
-          ''').strip() + '\n'
-
-          save_owned(
-              runner,
-              bash,
-              '# Managed by project-update.yml'
-          )
-
-          md = dedent('''
-          <!-- Managed by project-update.yml: Stage 2 -->
-          # Runtime Permissions: P1-P3
-
-          Исследуется механизм управления разрешением
-          `android.permission.CAMERA` на Android 13 и Android 16.
-
-          Проверяется состояние разрешения внутри приложения
-          SecurityClient через Android API `checkSelfPermission`.
-
-          ## Эксперименты
-
-          | ID | Подготовка | Ожидаемый результат |
-          |---|---|---|
-          | P1 | Отзыв разрешения CAMERA | DENY |
-          | P2 | Выдача разрешения CAMERA | ALLOW |
-          | P3 | Повторный отзыв CAMERA | DENY |
-
-          ## Методика
-
-          1. Установить тестовые приложения.
-          2. Подготовить необходимое состояние разрешения через ADB.
-          3. Запустить PermissionProbeActivity.
-          4. Проверить состояние разрешения внутри приложения.
-          5. Сохранить результат и журналы.
-          6. Повторить на другой версии Android.
-
-          ## Ограничения
-
-          Испытание проверяет механизм контроля разрешений
-          приложения, но не работу физической камеры.
-
-          Выдача и отзыв разрешений автоматизированы через ADB.
-          Пользовательские диалоги предоставления разрешений
-          в этих сценариях не исследуются.
-
-          Отзыв разрешения может завершить процесс приложения.
-          Поэтому перед проверкой запускается новая Activity.
-
-          Результаты сохраняются в report.json.
-          ''').strip() + '\n'
-
-          save_owned(
-              doc,
-              md,
-              '<!-- Managed by project-update.yml: Stage 2 -->'
-          )
-
-          print('Stage 2 source files prepared successfully.')
-
-          PY_UPDATE
-
-      - name: Commit Stage 2 files
+      - name: Commit only ordinary source and documentation files
         shell: bash
         run: |
           set -euo pipefail
-
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-          git add -- client/src/main/AndroidManifest.xml
-
-          git add -- client/src/main/java/org/example/securitylab/client/PermissionProbeActivity.kt
-
-          git add -- scripts/run-stage2.sh
-
-          git add -- experiments/permissions.md
-
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- owner/src/main/AndroidManifest.xml client/src/main/AndroidManifest.xml
+          git add -- owner/src/main/java/org/example/securitylab/owner/StorageProbeActivity.kt
+          git add -- client/src/main/java/org/example/securitylab/client/StorageProbeActivity.kt
+          git add -- scripts/storage-tests.py scripts/run-stage3.sh scripts/run-tests.sh scripts/publish-results.py
+          git add -- experiments/catalog.json experiments/storage.md
           if git diff --cached --quiet; then
-            echo "Stage 2 files are already up to date."
+            echo 'Stage 3 files already current.'
           else
-            git commit -m "feat: add Stage 2 runtime permission tests [skip ci]"
+            git commit -m 'feat: add Scoped Storage scenarios F1-F3 [skip ci]'
             git push origin "HEAD:${{ github.event.repository.default_branch }}"
           fi
