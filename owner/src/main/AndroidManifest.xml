@@ -23,5 +23,6 @@
             android:exported="true"
             android:readPermission="org.example.securitylab.owner.permission.READ_SECURE" />
             <activity android:name=".StorageProbeActivity" android:exported="true" />
+            <activity android:name=".KeystoreProbeActivity" android:exported="true" />
     </application>
 </manifest>

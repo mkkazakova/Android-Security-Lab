@@ -15,5 +15,6 @@
         </activity>
         <activity android:name=".PermissionProbeActivity" android:exported="true" />
             <activity android:name=".StorageProbeActivity" android:exported="true" />
+            <activity android:name=".KeystoreProbeActivity" android:exported="true" />
     </application>
 </manifest>
