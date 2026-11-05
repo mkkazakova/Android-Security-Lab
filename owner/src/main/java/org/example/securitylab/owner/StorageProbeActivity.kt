@@ -1,3 +1,4 @@
+// ASL_VISUAL_EVIDENCE_V1
 // Managed by project-update.yml - Stage 3
 package org.example.securitylab.owner
 
@@ -30,9 +31,6 @@ class StorageProbeActivity : Activity() {
             .put("observed", observed).put("pass", passed)
             .put("detail", detail)
         Log.i("SecurityLab", "ASL_STORAGE_RESULT:$result")
-        setContentView(TextView(this).apply {
-            text = "Storage F1: $observed"
-            textSize = 23f
-        })
+        EvidenceScreen.show(this, "SecurityOwner • Файлы F1", listOf(result))
     }
 }

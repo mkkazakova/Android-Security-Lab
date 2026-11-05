@@ -1,3 +1,4 @@
+// ASL_VISUAL_EVIDENCE_V1
 package org.example.securitylab.client
 
 import android.app.Activity
@@ -9,7 +10,7 @@ import org.json.JSONObject
 import java.io.File
 
 class ClientActivity : Activity() {
-    private val records = mutableListOf<Triple<String, Boolean, String>>()
+    private val records = mutableListOf<JSONObject>()
     private lateinit var statusView: TextView
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -28,7 +29,7 @@ class ClientActivity : Activity() {
         val result = JSONObject().put("id", id).put("expected", expected)
             .put("observed", observed).put("pass", passed).put("detail", detail.take(200))
         Log.i("SecurityLab", "ASL_RESULT:$result")
-        synchronized(records) { records.add(Triple(id, passed, observed)) }
+        synchronized(records) { records.add(result) }
     }
 
     private data class Observation(val value: String, val detail: String)
@@ -81,15 +82,11 @@ class ClientActivity : Activity() {
         val guarded = providerRead("org.example.securitylab.owner.protected")
         report("S5", "DENY", guarded.value, guarded.detail)
 
-        val results = synchronized(records) { records.sortedBy { it.first }.toList() }
+        val results = synchronized(records) {
+            records.sortedBy { it.optString("id", "") }.toList()
+        }
         runOnUiThread {
-            statusView.text = buildString {
-                append("SecurityClient — Sandbox / IPC\n\n")
-                results.forEach { (id, passed, observed) ->
-                    append("$id: ${if (passed) "PASS" else "FAIL"} ($observed)\n")
-                }
-                append("\nDetailed records: GitHub Actions logs")
-            }
+            EvidenceScreen.show(this, "SecurityClient • Sandbox / IPC", results)
         }
     }
 }

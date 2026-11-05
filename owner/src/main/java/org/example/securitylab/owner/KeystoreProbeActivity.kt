@@ -1,3 +1,4 @@
+// ASL_VISUAL_EVIDENCE_V1
 // Managed by project-update.yml - Stage 4 Android Keystore
 package org.example.securitylab.owner
 
@@ -95,10 +96,6 @@ class KeystoreProbeActivity : Activity() {
             .put("detail", detail)
         if (securityLevel != null) result.put("security_level", securityLevel)
         Log.i("SecurityLab", "ASL_KEYSTORE_RESULT:$result")
-        setContentView(TextView(this).apply {
-            text = "Keystore $scenario: $observed"
-            textSize = 23f
-            setPadding(24, 42, 20, 20)
-        })
+        EvidenceScreen.show(this, "SecurityOwner • Android Keystore", listOf(result))
     }
 }

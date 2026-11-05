@@ -1,3 +1,4 @@
+// ASL_VISUAL_EVIDENCE_V1
 // Managed by project-update.yml - Stage 3
 package org.example.securitylab.client
 
@@ -93,9 +94,6 @@ class StorageProbeActivity : Activity() {
             .put("observed", observed).put("pass", observed == expected)
             .put("detail", detail)
         Log.i("SecurityLab", "ASL_STORAGE_RESULT:$result")
-        setContentView(TextView(this).apply {
-            text = "$id: $observed"
-            textSize = 23f
-        })
+        EvidenceScreen.show(this, "SecurityClient • Файлы", listOf(result))
     }
 }

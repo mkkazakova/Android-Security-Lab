@@ -149,3 +149,89 @@ README.write_text(updated.rstrip() + '\n', encoding='utf-8')
     'api_36': total(36),
 }, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
 print('Published', len(TESTS), 'unique scenarios: Android 13', total(33), '/ Android 16', total(36))
+
+# ASL_VISUAL_EVIDENCE_V1 - extend successful result publication with verified UI captures.
+# This code runs after the existing guarded publisher. It never alters the measured JSON.
+from pathlib import Path as _ASLPath
+_ASL_SRC = _ASLPath('downloaded')
+_ASL_DST = _ASLPath('docs/screenshots')
+_ASL_DST.mkdir(parents=True, exist_ok=True)
+_ASL_NAMES = (
+    'installed-apps.png', 'camera-permission-dialog.png',
+    'evidence-p1.png','evidence-p2.png','evidence-p3.png',
+    'evidence-f1.png','evidence-f2.png',
+    'evidence-k1.png','evidence-k2.png','evidence-k3.png',
+)
+for _api in (33, 36):
+    _folder = _ASL_SRC / f'securitylab-api-{_api}'
+    for _name in _ASL_NAMES:
+        _src = _folder / _name
+        _dst = _ASL_DST / f'api-{_api}-{_name}'
+        if _src.is_file() and _src.read_bytes().startswith(b'\x89PNG\r\n\x1a\n'):
+            _dst.write_bytes(_src.read_bytes())
+            print(f'Published system/app screenshot: {_dst}')
+        elif _dst.is_file():
+            print(f'Retaining last verified screenshot: {_dst}')
+
+
+# Refresh legacy Stage 1 image references as well: these are real, newly
+# captured Owner/Client screens, not stale PASS-only screenshots.
+for _api, _version in ((33, '13'), (36, '16')):
+    for _role in ('owner', 'client'):
+        _src = _ASL_SRC / f'securitylab-api-{_api}' / f'{_role}.png'
+        _dst = _ASL_DST / f'stage1-android-{_version}-{_role}.png'
+        if _src.is_file() and _src.read_bytes().startswith(b'\x89PNG\r\n\x1a\n'):
+            _dst.write_bytes(_src.read_bytes())
+            print(f'Refreshed Stage 1 UI: {_dst}')
+
+
+def _asl_img(api, name, alt):
+    _p = _ASL_DST / f'api-{api}-{name}'
+    return (f'<img src="{_p.as_posix()}" width="245" alt="{alt}">'
+            if _p.is_file() else 'Нет подтверждённого изображения')
+
+
+_asl_rows = [
+    ('Установленные приложения в системном меню', 'installed-apps.png'),
+    ('Системный запрос доступа к CAMERA', 'camera-permission-dialog.png'),
+    ('P1: разрешение CAMERA отсутствует', 'evidence-p1.png'),
+    ('P2: разрешение CAMERA предоставлено', 'evidence-p2.png'),
+    ('P3: разрешение CAMERA отозвано', 'evidence-p3.png'),
+    ('F1: чтение собственного файла', 'evidence-f1.png'),
+    ('F2: запрет чтения чужого файла', 'evidence-f2.png'),
+    ('K1: шифрование и расшифрование', 'evidence-k1.png'),
+    ('K2: отказ в экспорте ключа', 'evidence-k2.png'),
+    ('K3: межприложенная изоляция ключа', 'evidence-k3.png'),
+]
+_asl_lines = [
+    '<!-- ASL_VISUAL_GALLERY_START -->',
+    '| Наблюдение | Android 13 | Android 16 |',
+    '|---|---|---|',
+]
+for _title, _name in _asl_rows:
+    _asl_lines.append(
+        f'| {_title} | {_asl_img(33, _name, _title + " API 33")} | '
+        f'{_asl_img(36, _name, _title + " API 36")} |'
+    )
+_asl_lines += [
+    '',
+    'S1 и S2–S5: реальные результаты операций показаны на экранах Owner/Client ниже; '
+    'ошибки Android дополнительно подтверждаются `detail` в JSON и Logcat. '
+    'F3: подлинный системный выбор документа показан в разделе файловых испытаний.',
+    '',
+    'Для отказов в доступе Android не всегда показывает системное окно: '
+    'приложение получает исключение или ответ API. '
+    'Диагностические экраны отображают именно эти ответы, а не системные уведомления.',
+    '<!-- ASL_VISUAL_GALLERY_END -->',
+]
+_asl_readme = _ASLPath('README.md')
+_asl_text = _asl_readme.read_text(encoding='utf-8')
+_asl_start = '<!-- ASL_VISUAL_GALLERY_START -->'
+_asl_end = '<!-- ASL_VISUAL_GALLERY_END -->'
+if _asl_text.count(_asl_start)!=1 or _asl_text.count(_asl_end)!=1:
+    raise SystemExit('Cannot update visual gallery: README markers missing or duplicated')
+_asl_before, _asl_rest = _asl_text.split(_asl_start,1)
+_, _asl_after = _asl_rest.split(_asl_end,1)
+_asl_new = _asl_before + '\n'.join(_asl_lines) + _asl_after
+_asl_new = _asl_new.replace('Это рабочая документация экспериментов, а не текст курсового отчёта.', '')
+_asl_readme.write_text(_asl_new, encoding='utf-8')

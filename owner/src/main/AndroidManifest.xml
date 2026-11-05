@@ -2,7 +2,7 @@
     <permission
         android:name="org.example.securitylab.owner.permission.READ_SECURE"
         android:protectionLevel="signature" />
-    <application android:label="SecurityOwner" android:theme="@android:style/Theme.Material.Light.NoActionBar">
+    <application android:icon="@drawable/asl_icon" android:label="SecurityOwner" android:theme="@android:style/Theme.Material.Light.NoActionBar">
         <activity android:name=".OwnerActivity" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

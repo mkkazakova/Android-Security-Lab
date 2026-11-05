@@ -1,3 +1,4 @@
+// ASL_VISUAL_EVIDENCE_V1
 // Managed by project-update.yml - Stage 2
 package org.example.securitylab.client
 
@@ -45,13 +46,6 @@ class PermissionProbeActivity : Activity() {
             "ASL_PERMISSION_RESULT:$result"
         )
 
-        setContentView(TextView(this).apply {
-            text = "Runtime Permissions\n" +
-                "$testId: $observed\n" +
-                (if (passed) "PASS" else "FAIL")
-
-            textSize = 23f
-            setPadding(32, 48, 20, 20)
-        })
+        EvidenceScreen.show(this, "SecurityClient • Разрешение CAMERA", listOf(result))
     }
 }

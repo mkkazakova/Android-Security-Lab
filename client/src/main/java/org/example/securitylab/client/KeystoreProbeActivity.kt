@@ -1,3 +1,4 @@
+// ASL_VISUAL_EVIDENCE_V1
 // Managed by project-update.yml - Stage 4 Android Keystore
 package org.example.securitylab.client
 
@@ -30,10 +31,6 @@ class KeystoreProbeActivity : Activity() {
             .put("pass", observed == "DENY")
             .put("detail", detail)
         Log.i("SecurityLab", "ASL_KEYSTORE_RESULT:$result")
-        setContentView(TextView(this).apply {
-            text = "Keystore K3: $observed"
-            textSize = 23f
-            setPadding(24, 42, 20, 20)
-        })
+        EvidenceScreen.show(this, "SecurityClient • Android Keystore", listOf(result))
     }
 }

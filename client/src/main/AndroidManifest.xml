@@ -6,7 +6,7 @@
         <provider android:authorities="org.example.securitylab.owner.protected" />
     </queries>
     <uses-permission android:name="android.permission.CAMERA" />
-    <application android:label="SecurityClient" android:theme="@android:style/Theme.Material.Light.NoActionBar">
+    <application android:icon="@drawable/asl_icon" android:label="SecurityClient" android:theme="@android:style/Theme.Material.Light.NoActionBar">
         <activity android:name=".ClientActivity" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -16,5 +16,6 @@
         <activity android:name=".PermissionProbeActivity" android:exported="true" />
             <activity android:name=".StorageProbeActivity" android:exported="true" />
             <activity android:name=".KeystoreProbeActivity" android:exported="true" />
+        <activity android:name=".PermissionDialogDemoActivity" android:exported="true" />
     </application>
 </manifest>

@@ -1,3 +1,4 @@
+// ASL_VISUAL_EVIDENCE_V1
 package org.example.securitylab.owner
 
 import android.app.Activity
@@ -22,7 +23,7 @@ class OwnerActivity : Activity() {
                 .put("observed", "ERROR").put("pass", false)
                 .put("detail", e.javaClass.simpleName)
             Log.i("SecurityLab", "ASL_RESULT:$result")
-            setContentView(TextView(this).apply { text = "SecurityOwner: error\n${e.message}"; textSize = 20f })
+            EvidenceScreen.show(this, "SecurityOwner • Sandbox S1", listOf(result))
             return
         }
         val passed = observed == data
@@ -30,10 +31,6 @@ class OwnerActivity : Activity() {
             .put("observed", if (passed) "ALLOW" else "INCORRECT_DATA")
             .put("pass", passed).put("detail", detail)
         Log.i("SecurityLab", "ASL_RESULT:$result")
-        setContentView(TextView(this).apply {
-            text = "SecurityOwner\n\nS1: " + (if (passed) "PASS" else "FAIL")
-            textSize = 24f
-            setPadding(28, 48, 16, 16)
-        })
+        EvidenceScreen.show(this, "SecurityOwner • Sandbox S1", listOf(result))
     }
 }
