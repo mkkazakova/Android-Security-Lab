@@ -1,6 +1,6 @@
 {
-  "generated_at_utc": "2026-11-05 11:20 UTC",
-  "workflow_run_url": "https://github.com/mkkazakova/Android-Security-Lab/actions/runs/42017469126",
+  "generated_at_utc": "2026-11-05 11:30 UTC",
+  "workflow_run_url": "https://github.com/mkkazakova/Android-Security-Lab/actions/runs/42018997711",
   "expected_scenarios": [
     "S1",
     "S2",
@@ -14,6 +14,6 @@
     "F2",
     "F3"
   ],
-  "api_33": "FAIL",
-  "api_36": "FAIL"
+  "api_33": "PASS",
+  "api_36": "PASS"
 }

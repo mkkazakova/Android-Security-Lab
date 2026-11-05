@@ -31,7 +31,7 @@
 <!-- ANDROID_STAGE1_START -->
 ## Экспериментальные результаты Android Security Lab
 
-Обновлено: **2026-11-05 11:20 UTC**. [Запуск GitHub Actions](https://github.com/mkkazakova/Android-Security-Lab/actions/runs/42017469126).
+Обновлено: **2026-11-05 11:30 UTC**. [Запуск GitHub Actions](https://github.com/mkkazakova/Android-Security-Lab/actions/runs/42018997711).
 
 | Проверка | Android 13 (API 33) | Android 16 (API 36) |
 |---|---|---|
@@ -45,9 +45,9 @@
 | **P3** — CAMERA: разрешение отозвано | PASS (DENY) | PASS (DENY) |
 | **F1** — Владелец читает свой app-specific внешний файл | PASS (ALLOW) | PASS (ALLOW) |
 | **F2** — Другому приложению запрещён прямой доступ к app-specific файлу | PASS (DENY) | PASS (DENY) |
-| **F3** — Доступ к документу через системный выбор файла | ERROR (ERROR) | ERROR (ERROR) |
+| **F3** — Доступ к документу через системный выбор файла | PASS (ALLOW) | PASS (ALLOW) |
 
-**Сводный статус:** Android 13 — FAIL; Android 16 — FAIL.
+**Сводный статус:** Android 13 — PASS; Android 16 — PASS.
 
 ### Наблюдения и интерпретация
 
@@ -63,7 +63,7 @@
 | P3 | CAMERA state checked inside SecurityClient | CAMERA state checked inside SecurityClient |
 | F1 | Read own app-specific external file via getExternalFilesDir | Read own app-specific external file via getExternalFilesDir |
 | F2 | Direct cross-app read rejected: FileNotFoundException; F1 verifies fixture | Direct cross-app read rejected: FileNotFoundException; F1 verifies fixture |
-| F3 | No application-side result for F3 after picker UI automation; inspect f3-ui.xml, f3-last-screen.png, f3-debug.log | No application-side result for F3 after picker UI automation; inspect f3-ui.xml, f3-last-screen.png, f3-debug.log |
+| F3 | System picker provided URI; ContentResolver read selected document | System picker provided URI; ContentResolver read selected document |
 
 ### Скриншоты из Android Emulator
 

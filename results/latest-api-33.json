@@ -4,7 +4,7 @@
   "android_release": "13",
   "target_sdk": 33,
   "fixture_verified_from_owner_identity": true,
-  "status": "FAIL",
+  "status": "PASS",
   "results": [
     {
       "id": "S1",
@@ -79,9 +79,9 @@
     {
       "id": "F3",
       "expected": "ALLOW",
-      "observed": "ERROR",
-      "pass": false,
-      "detail": "No application-side result for F3 after picker UI automation; inspect f3-ui.xml, f3-last-screen.png, f3-debug.log"
+      "observed": "ALLOW",
+      "pass": true,
+      "detail": "System picker provided URI; ContentResolver read selected document"
     }
   ],
   "permissions_control_method": "ADB pm grant/revoke; checkSelfPermission inside application"
