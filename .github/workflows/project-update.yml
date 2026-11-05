@@ -346,8 +346,24 @@ jobs:
 
           def choose(nodes, predicate):
               matches = [n for n in nodes if predicate(label(n).casefold())]
-              # Prefer a clickable node when several nested elements refer to the same item.
               matches.sort(key=lambda n: n.get('clickable') != 'true')
+              return matches[0] if matches else None
+
+
+          def exact_document_node(nodes):
+              """Select the document's filename, never a 'Preview the file ...' button.
+
+              DocumentsUI can expose both a preview action and the filename. A fuzzy
+              substring match accidentally clicks the preview, which opens Android's
+              'Open with Chrome / HTML Viewer' chooser instead of returning the URI.
+              """
+              matches = [
+                  n for n in nodes
+                  if n.get('text', '').strip() == DOCUMENT
+                  or n.get('content-desc', '').strip() == DOCUMENT
+              ]
+              # Prefer the visible filename text. Its center is inside the document row.
+              matches.sort(key=lambda n: n.get('text', '').strip() != DOCUMENT)
               return matches[0] if matches else None
 
 
@@ -381,7 +397,10 @@ jobs:
 
                   attempted = set()
                   clicked_file = False
-                  deadline = time.monotonic() + 110
+                  file_clicks = 0
+                  last_file_click = 0.0
+                  unexpected_chooser_count = 0
+                  deadline = time.monotonic() + 75
                   while time.monotonic() < deadline:
                       result = read_record(case)
                       if result is not None:
@@ -399,13 +418,35 @@ jobs:
                       fingerprint = screen[:1500]
                       note('Picker items: ' + screen[:350])
 
-                      file_node = choose(nodes, lambda s: DOCUMENT.casefold() in s)
-                      if file_node is not None and ('file', fingerprint) not in attempted:
-                          attempted.add(('file', fingerprint))
+                      # 'Open with' is a viewer chooser, not an ACTION_OPEN_DOCUMENT result.
+                      # If it appears, the user-selection operation did not complete.
+                      if any(label(n).casefold() == 'open with' for n in nodes):
+                          screenshot('f3-unexpected-viewer.png')
+                          unexpected_chooser_count += 1
+                          note('Unexpected viewer chooser detected; returning to picker')
+                          if unexpected_chooser_count > 1:
+                              raise RuntimeError(
+                                  'Android opened a viewer chooser instead of returning '
+                                  'the selected document URI; inspect f3-unexpected-viewer.png '
+                                  'and f3-ui.xml'
+                              )
+                          adb('shell', 'input', 'keyevent', 'KEYCODE_BACK')
+                          last_file_click = 0.0
+                          clicked_file = False
+                          time.sleep(1)
+                          continue
+
+                      file_node = exact_document_node(nodes)
+                      now = time.monotonic()
+                      if file_node is not None and file_clicks < 2 and (
+                          not clicked_file or now - last_file_click > 12
+                      ):
                           screenshot('f3-picker.png')
                           if tap(file_node):
                               clicked_file = True
-                              note('Tapped document in system picker')
+                              file_clicks += 1
+                              last_file_click = now
+                              note('Tapped exact filename node (excluded preview icon)')
                               time.sleep(2)
                               continue
 
