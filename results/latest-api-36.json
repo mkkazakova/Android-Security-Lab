@@ -1,5 +1,5 @@
 {
-  "stage": "sandbox_ipc_permissions_storage",
+  "stage": "sandbox_ipc_permissions_storage_keystore",
   "api": 36,
   "android_release": "16",
   "target_sdk": 33,
@@ -82,6 +82,28 @@
       "observed": "ALLOW",
       "pass": true,
       "detail": "System picker provided URI; ContentResolver read selected document"
+    },
+    {
+      "id": "K1",
+      "expected": "ALLOW",
+      "observed": "ALLOW",
+      "pass": true,
+      "detail": "AES-256/GCM encrypt-decrypt round-trip; ciphertext and IV generated in app"
+    },
+    {
+      "id": "K2",
+      "expected": "DENY",
+      "observed": "DENY",
+      "pass": true,
+      "detail": "SecretKey.getEncoded()=null; export via JCA denied only when null; KeyInfo.securityLevel=0",
+      "security_level": "KeyInfo.securityLevel=0"
+    },
+    {
+      "id": "K3",
+      "expected": "DENY",
+      "observed": "DENY",
+      "pass": true,
+      "detail": "Client UID: alias visible=false, key accessible=false; owner alias remains accessible (positive control)"
     }
   ],
   "permissions_control_method": "ADB pm grant/revoke; checkSelfPermission inside application"

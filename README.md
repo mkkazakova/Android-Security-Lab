@@ -31,7 +31,7 @@
 <!-- ANDROID_STAGE1_START -->
 ## Экспериментальные результаты Android Security Lab
 
-Обновлено: **2026-11-05 11:30 UTC**. [Запуск GitHub Actions](https://github.com/mkkazakova/Android-Security-Lab/actions/runs/42018997711).
+Обновлено: **2026-11-05 11:45 UTC**. [Запуск GitHub Actions](https://github.com/mkkazakova/Android-Security-Lab/actions/runs/42021014242).
 
 | Проверка | Android 13 (API 33) | Android 16 (API 36) |
 |---|---|---|
@@ -46,6 +46,9 @@
 | **F1** — Владелец читает свой app-specific внешний файл | PASS (ALLOW) | PASS (ALLOW) |
 | **F2** — Другому приложению запрещён прямой доступ к app-specific файлу | PASS (DENY) | PASS (DENY) |
 | **F3** — Доступ к документу через системный выбор файла | PASS (ALLOW) | PASS (ALLOW) |
+| **K1** — Android Keystore: шифрование и расшифрование AES-GCM | PASS (ALLOW) | PASS (ALLOW) |
+| **K2** — Android Keystore: отказ в экспорте байтов секретного ключа | PASS (DENY) | PASS (DENY) |
+| **K3** — Android Keystore: изоляция ключа между приложениями | PASS (DENY) | PASS (DENY) |
 
 **Сводный статус:** Android 13 — PASS; Android 16 — PASS.
 
@@ -64,6 +67,9 @@
 | F1 | Read own app-specific external file via getExternalFilesDir | Read own app-specific external file via getExternalFilesDir |
 | F2 | Direct cross-app read rejected: FileNotFoundException; F1 verifies fixture | Direct cross-app read rejected: FileNotFoundException; F1 verifies fixture |
 | F3 | System picker provided URI; ContentResolver read selected document | System picker provided URI; ContentResolver read selected document |
+| K1 | AES-256/GCM encrypt-decrypt round-trip; ciphertext and IV generated in app | AES-256/GCM encrypt-decrypt round-trip; ciphertext and IV generated in app |
+| K2 | SecretKey.getEncoded()=null; export via JCA denied only when null; KeyInfo.securityLevel=0 | SecretKey.getEncoded()=null; export via JCA denied only when null; KeyInfo.securityLevel=0 |
+| K3 | Client UID: alias visible=false, key accessible=false; owner alias remains accessible (positive control) | Client UID: alias visible=false, key accessible=false; owner alias remains accessible (positive control) |
 
 ### Скриншоты из Android Emulator
 
