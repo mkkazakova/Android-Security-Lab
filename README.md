@@ -6,7 +6,22 @@
 **SecurityOwner** и **SecurityClient** — два обычных Android-приложения (APK), установленные в Android Emulator. Они имеют разные UID; операции выполняются через стандартные Android API. Экраны показывают наблюдения приложений, а системные окна — отдельно, когда Android действительно их предоставляет.
 
 <!-- ASL_VISUAL_GALLERY_START -->
-Изображения будут добавлены после полного запуска испытаний.
+| Наблюдение | Android 13 | Android 16 |
+|---|---|---|
+| Установленные приложения в системном меню | <img src="docs/screenshots/api-33-installed-apps.png" width="245" alt="Установленные приложения в системном меню API 33"> | <img src="docs/screenshots/api-36-installed-apps.png" width="245" alt="Установленные приложения в системном меню API 36"> |
+| Системный запрос доступа к CAMERA | <img src="docs/screenshots/api-33-camera-permission-dialog.png" width="245" alt="Системный запрос доступа к CAMERA API 33"> | <img src="docs/screenshots/api-36-camera-permission-dialog.png" width="245" alt="Системный запрос доступа к CAMERA API 36"> |
+| P1: разрешение CAMERA отсутствует | <img src="docs/screenshots/api-33-evidence-p1.png" width="245" alt="P1: разрешение CAMERA отсутствует API 33"> | <img src="docs/screenshots/api-36-evidence-p1.png" width="245" alt="P1: разрешение CAMERA отсутствует API 36"> |
+| P2: разрешение CAMERA предоставлено | <img src="docs/screenshots/api-33-evidence-p2.png" width="245" alt="P2: разрешение CAMERA предоставлено API 33"> | <img src="docs/screenshots/api-36-evidence-p2.png" width="245" alt="P2: разрешение CAMERA предоставлено API 36"> |
+| P3: разрешение CAMERA отозвано | <img src="docs/screenshots/api-33-evidence-p3.png" width="245" alt="P3: разрешение CAMERA отозвано API 33"> | <img src="docs/screenshots/api-36-evidence-p3.png" width="245" alt="P3: разрешение CAMERA отозвано API 36"> |
+| F1: чтение собственного файла | <img src="docs/screenshots/api-33-evidence-f1.png" width="245" alt="F1: чтение собственного файла API 33"> | <img src="docs/screenshots/api-36-evidence-f1.png" width="245" alt="F1: чтение собственного файла API 36"> |
+| F2: запрет чтения чужого файла | <img src="docs/screenshots/api-33-evidence-f2.png" width="245" alt="F2: запрет чтения чужого файла API 33"> | <img src="docs/screenshots/api-36-evidence-f2.png" width="245" alt="F2: запрет чтения чужого файла API 36"> |
+| K1: шифрование и расшифрование | <img src="docs/screenshots/api-33-evidence-k1.png" width="245" alt="K1: шифрование и расшифрование API 33"> | <img src="docs/screenshots/api-36-evidence-k1.png" width="245" alt="K1: шифрование и расшифрование API 36"> |
+| K2: отказ в экспорте ключа | <img src="docs/screenshots/api-33-evidence-k2.png" width="245" alt="K2: отказ в экспорте ключа API 33"> | <img src="docs/screenshots/api-36-evidence-k2.png" width="245" alt="K2: отказ в экспорте ключа API 36"> |
+| K3: межприложенная изоляция ключа | <img src="docs/screenshots/api-33-evidence-k3.png" width="245" alt="K3: межприложенная изоляция ключа API 33"> | <img src="docs/screenshots/api-36-evidence-k3.png" width="245" alt="K3: межприложенная изоляция ключа API 36"> |
+
+S1 и S2–S5: реальные результаты операций показаны на экранах Owner/Client ниже; ошибки Android дополнительно подтверждаются `detail` в JSON и Logcat. F3: подлинный системный выбор документа показан в разделе файловых испытаний.
+
+Для отказов в доступе Android не всегда показывает системное окно: приложение получает исключение или ответ API. Диагностические экраны отображают именно эти ответы, а не системные уведомления.
 <!-- ASL_VISUAL_GALLERY_END -->
 <!-- ASL_VISUAL_INTRO_END -->
 
@@ -229,7 +244,7 @@
 <!-- ANDROID_STAGE1_START -->
 ## Экспериментальные результаты Android Security Lab
 
-Обновлено: **2026-11-05 15:51 UTC**. [Запуск GitHub Actions](https://github.com/mkkazakova/Android-Security-Lab/actions/runs/42058531623).
+Обновлено: **2026-11-05 17:55 UTC**. [Запуск GitHub Actions](https://github.com/mkkazakova/Android-Security-Lab/actions/runs/42078468458).
 
 | Проверка | Android 13 (API 33) | Android 16 (API 36) |
 |---|---|---|
