@@ -1,4 +1,4 @@
-name: Android Security Lab - Final Documentation Update
+name: Android Security Lab - Visual Evidence Update
 
 on:
   workflow_dispatch:
@@ -11,453 +11,702 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  update-project:
-    name: Document all 14 completed experiments
+  update-visuals:
+    name: Add real Android UI screenshots and diagnostics
     if: ${{ github.ref_name == github.event.repository.default_branch }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 30
+
     steps:
-      - name: Checkout repository
+      - name: Check out default branch
         uses: actions/checkout@v6
         with:
           ref: ${{ github.event.repository.default_branch }}
 
-      - name: Validate complete workflow before making changes
+      - name: Check that YAML was pasted completely
         shell: bash
         run: |
           set -euo pipefail
-          python3 - <<'ASL_FINAL_PREFLIGHT'
+          python3 - <<'ASL_VISUAL_PREFLIGHT'
           from pathlib import Path
-          workflow=Path('.github/workflows/project-update.yml').read_text(encoding='utf-8')
-          for marker in ('ASL_FINAL_DOCS_GENERATOR', 'ASL_FINAL_DOCS_END',
-                         'Validate generated documentation', 'Commit documentation and publisher'):
-              if marker not in workflow:
-                  raise SystemExit(f'Incomplete workflow paste: missing {marker}')
-          if len(workflow)<16000:
-              raise SystemExit('Workflow file looks truncated')
-          print('Final documentation workflow completeness: OK')
-          ASL_FINAL_PREFLIGHT
+          p=Path('.github/workflows/project-update.yml')
+          data=p.read_text(encoding='utf-8')
+          for marker in ('ASL_VISUAL_UPDATE_PY', 'ASL_VISUAL_EVIDENCE_V1',
+                         'Verify source compatibility', 'Commit visual updates'):
+              if marker not in data:
+                  raise SystemExit(f'Incomplete workflow: {marker} missing')
+          if len(data)<26000:
+              raise SystemExit('Workflow looks truncated; replace entire file')
+          print('Workflow integrity: OK')
+          ASL_VISUAL_PREFLIGHT
+          sha256sum results/latest-api-33.json results/latest-api-36.json results/summary.json > /tmp/asl-verified-results.sha256
 
-      - name: Generate experiment instructions from verified reports
+      - name: Generate Android diagnostic screens and screenshot capture scripts
         shell: bash
         run: |
           set -euo pipefail
-          python3 - <<'ASL_FINAL_DOCS_GENERATOR'
-          # Final documentation updater for Android-Security-Lab.
-          # Never alters Kotlin, Bash test launchers, or previously measured JSON data.
+          python3 - <<'ASL_VISUAL_UPDATE_PY'
+          #!/usr/bin/env python3
+          # Applied by the GitHub Actions workflow embedded below.
           from pathlib import Path
+          import re
+          import textwrap
+          import json
+          import xml.etree.ElementTree as ET
+
+          ROOT = Path('.')
+          EXPECTED = ['S1','S2','S3','S4','S5','P1','P2','P3','F1','F2','F3','K1','K2','K3']
+          REPORTS = []
+          for api in (33, 36):
+              report = Path(f'results/latest-api-{api}.json')
+              if not report.is_file():
+                  raise SystemExit(f'Missing prior valid test evidence: {report}')
+              obj = json.loads(report.read_text(encoding='utf-8'))
+              if obj.get('api') != api or obj.get('status') != 'PASS' or [r.get('id') for r in obj.get('results',[])] != EXPECTED or not all(r.get('pass') is True for r in obj['results']):
+                  raise SystemExit(f'Previous evidence incomplete: {report}')
+              REPORTS.append(report)
+
+          REQUIRED = [
+              'owner/src/main/java/org/example/securitylab/owner/OwnerActivity.kt',
+              'client/src/main/java/org/example/securitylab/client/ClientActivity.kt',
+              'client/src/main/java/org/example/securitylab/client/PermissionProbeActivity.kt',
+              'owner/src/main/java/org/example/securitylab/owner/StorageProbeActivity.kt',
+              'client/src/main/java/org/example/securitylab/client/StorageProbeActivity.kt',
+              'owner/src/main/java/org/example/securitylab/owner/KeystoreProbeActivity.kt',
+              'client/src/main/java/org/example/securitylab/client/KeystoreProbeActivity.kt',
+              'owner/src/main/AndroidManifest.xml',
+              'client/src/main/AndroidManifest.xml',
+              'scripts/run-tests.sh',
+              'scripts/publish-results.py',
+              'README.md',
+          ]
+          for item in REQUIRED:
+              if not Path(item).is_file():
+                  raise SystemExit(f'Missing mandatory existing source: {item}')
+
+
+          def put(path, source, marker='ASL_VISUAL_EVIDENCE_V1'):
+              path = Path(path)
+              if path.exists() and marker not in path.read_text(encoding='utf-8'):
+                  raise SystemExit(f'Unexpected user content at generated path {path}; refusing to overwrite')
+              path.parent.mkdir(parents=True, exist_ok=True)
+              if not path.exists() or path.read_text(encoding='utf-8') != source:
+                  path.write_text(source, encoding='utf-8')
+                  print('Updated:', path)
+
+
+          SCREEN_KT = r'''// ASL_VISUAL_EVIDENCE_V1
+          package PACKAGENAME
+
+          import android.app.Activity
+          import android.graphics.Color
+          import android.graphics.Typeface
+          import android.graphics.drawable.GradientDrawable
+          import android.view.View
+          import android.widget.LinearLayout
+          import android.widget.ScrollView
+          import android.widget.TextView
+          import org.json.JSONObject
+
+          // Each card receives an observed JSON record emitted by the Android API test itself.
+          // No permission/access result is hardcoded in this visual component.
+          object EvidenceScreen {
+              private fun dp(activity: Activity, number: Int): Int =
+                  (number * activity.resources.displayMetrics.density + 0.5f).toInt()
+
+              private fun surface(activity: Activity, bg: Int, radius: Int): GradientDrawable =
+                  GradientDrawable().apply {
+                      setColor(bg)
+                      cornerRadius = dp(activity, radius).toFloat()
+                  }
+
+              private fun label(activity: Activity, value: String, size: Float,
+                                color: Int, bold: Boolean = false): TextView = TextView(activity).apply {
+                  text = value
+                  textSize = size
+                  setTextColor(color)
+                  if (bold) setTypeface(Typeface.DEFAULT, Typeface.BOLD)
+                  setLineSpacing(dp(activity, 2).toFloat(), 1f)
+              }
+
+              private fun operation(id: String): String = when (id) {
+                  "S1" -> "Создать файл во внутренней папке и прочитать его"
+                  "S2" -> "Прочитать чужой приватный файл по прямому пути"
+                  "S3" -> "Запросить закрытый ContentProvider"
+                  "S4" -> "Запросить открытый ContentProvider"
+                  "S5" -> "Запросить ContentProvider с ограничением доступа"
+                  "P1", "P2", "P3" -> "checkSelfPermission(CAMERA)"
+                  "F1" -> "getExternalFilesDir() и чтение собственного файла"
+                  "F2" -> "Чтение файла из Android/data другого приложения"
+                  "F3" -> "ACTION_OPEN_DOCUMENT и ContentResolver"
+                  "K1" -> "AES/GCM: шифрование и расшифрование"
+                  "K2" -> "SecretKey.getEncoded() и KeyInfo"
+                  "K3" -> "Доступ к имени ключа из другого UID"
+                  else -> "Операция Android API"
+              }
+
+              fun show(activity: Activity, title: String, records: List<JSONObject>) {
+                  val navy = Color.rgb(20, 36, 58)
+                  val gray = Color.rgb(82, 97, 112)
+                  val root = LinearLayout(activity).apply {
+                      orientation = LinearLayout.VERTICAL
+                      setPadding(dp(activity, 18), dp(activity, 23), dp(activity, 18), dp(activity, 25))
+                      setBackgroundColor(Color.rgb(243, 246, 250))
+                  }
+                  val scroll = ScrollView(activity).apply { isFillViewport = true }
+                  scroll.addView(root)
+                  activity.setContentView(scroll)
+
+                  root.addView(label(activity, "ANDROID SECURITY LAB", 12f, gray, true))
+                  root.addView(label(activity, title, 23f, navy, true).apply {
+                      setPadding(0, dp(activity, 4), 0, dp(activity, 6))
+                  })
+                  root.addView(label(activity, "Результаты операций внутри Android-приложения", 12f, gray))
+                  root.addView(label(activity, "Android API ${android.os.Build.VERSION.SDK_INT}  •  " +
+                      activity.packageName, 11f, gray).apply {
+                      setPadding(0, dp(activity, 6), 0, dp(activity, 15))
+                  })
+
+                  for (record in records) {
+                      val id = record.optString("id", "?")
+                      val expected = record.optString("expected", "?")
+                      val observed = record.optString("observed", "?")
+                      val passed = record.optBoolean("pass", false)
+                      val detail = record.optString("detail", "Нет диагностической информации")
+                      val status = if (passed) "СООТВЕТСТВУЕТ ОЖИДАНИЮ" else "ОШИБКА / НЕСОВПАДЕНИЕ"
+                      val accent = when {
+                          !passed -> Color.rgb(173, 40, 51)
+                          observed == "DENY" -> Color.rgb(145, 54, 38)
+                          else -> Color.rgb(20, 111, 78)
+                      }
+                      val card = LinearLayout(activity).apply {
+                          orientation = LinearLayout.VERTICAL
+                          background = surface(activity, Color.WHITE, 12)
+                          setPadding(dp(activity, 14), dp(activity, 12), dp(activity, 14), dp(activity, 15))
+                          elevation = dp(activity, 2).toFloat()
+                      }
+                      card.addView(label(activity, "$id  •  $status", 12f, accent, true))
+                      card.addView(label(activity, operation(id), 13f, navy).apply {
+                          setPadding(0, dp(activity, 6), 0, dp(activity, 5))
+                      })
+                      card.addView(label(activity, "Ожидалось: $expected     Получено: $observed",
+                          15f, navy, true).apply { setPadding(0, dp(activity, 6), 0, dp(activity, 7)) })
+                      card.addView(label(activity, detail, 13f, gray))
+                      if (record.has("security_level")) {
+                          card.addView(label(activity, record.optString("security_level"), 12f, gray).apply {
+                              setPadding(0, dp(activity, 6), 0, 0)
+                          })
+                      }
+                      root.addView(card, LinearLayout.LayoutParams(
+                          LinearLayout.LayoutParams.MATCH_PARENT,
+                          LinearLayout.LayoutParams.WRAP_CONTENT
+                      ).apply { bottomMargin = dp(activity, 10) })
+                  }
+                  root.addView(label(activity,
+                      "Запись создаётся после фактического обращения к Android API; полный протокол сохраняется в Logcat и JSON.",
+                      11f, gray).apply { setPadding(0, dp(activity, 6), 0, 0) })
+              }
+          }
+          '''
+          for role in ('owner', 'client'):
+              package = f'org.example.securitylab.{role}'
+              put(f'{role}/src/main/java/org/example/securitylab/{role}/EvidenceScreen.kt',
+                  SCREEN_KT.replace('PACKAGENAME', package))
+
+          # Carefully modify ONLY presentation calls. Report generation is not changed.
+          def patch_textview_screen(path, call, required_count):
+              p = Path(path)
+              content = p.read_text(encoding='utf-8')
+              marker = 'ASL_VISUAL_EVIDENCE_V1'
+              if marker in content:
+                  print('Already updated:', p)
+                  return
+              start_marker = 'setContentView(TextView(this).apply {'
+              if content.count(start_marker) != required_count:
+                  raise SystemExit(f'Unexpected TextView presentation structure: {p} ({content.count(start_marker)} != {required_count})')
+              for _ in range(required_count):
+                  start = content.find(start_marker)
+                  if start < 0:
+                      raise SystemExit(f'Could not locate view in {p}')
+                  brace_at = start + len(start_marker) - 1
+                  depth = 0
+                  close = -1
+                  for k in range(brace_at, len(content)):
+                      if content[k] == '{': depth += 1
+                      elif content[k] == '}':
+                          depth -= 1
+                          if depth == 0:
+                              close = k
+                              break
+                  if close < 0 or content[close+1:close+2] != ')':
+                      raise SystemExit(f'Mismatched Kotlin UI block: {p}')
+                  content = content[:start] + call + content[close+2:]
+              p.write_text('// ASL_VISUAL_EVIDENCE_V1\n' + content, encoding='utf-8')
+              print('Patched UI:', p)
+
+          patch_textview_screen(
+              'owner/src/main/java/org/example/securitylab/owner/OwnerActivity.kt',
+              'EvidenceScreen.show(this, "SecurityOwner • Sandbox S1", listOf(result))', 2)
+          patch_textview_screen(
+              'client/src/main/java/org/example/securitylab/client/PermissionProbeActivity.kt',
+              'EvidenceScreen.show(this, "SecurityClient • Разрешение CAMERA", listOf(result))', 1)
+          patch_textview_screen(
+              'owner/src/main/java/org/example/securitylab/owner/StorageProbeActivity.kt',
+              'EvidenceScreen.show(this, "SecurityOwner • Файлы F1", listOf(result))', 1)
+          patch_textview_screen(
+              'client/src/main/java/org/example/securitylab/client/StorageProbeActivity.kt',
+              'EvidenceScreen.show(this, "SecurityClient • Файлы", listOf(result))', 1)
+          patch_textview_screen(
+              'owner/src/main/java/org/example/securitylab/owner/KeystoreProbeActivity.kt',
+              'EvidenceScreen.show(this, "SecurityOwner • Android Keystore", listOf(result))', 1)
+          patch_textview_screen(
+              'client/src/main/java/org/example/securitylab/client/KeystoreProbeActivity.kt',
+              'EvidenceScreen.show(this, "SecurityClient • Android Keystore", listOf(result))', 1)
+
+          # S2-S5 was collecting only triplets for the UI, although full JSON was available.
+          p = Path('client/src/main/java/org/example/securitylab/client/ClientActivity.kt')
+          s = p.read_text(encoding='utf-8')
+          if 'ASL_VISUAL_EVIDENCE_V1' not in s:
+              old = 'private val records = mutableListOf<Triple<String, Boolean, String>>()'
+              if s.count(old) != 1 or s.count('records.add(Triple(id, passed, observed))') != 1:
+                  raise SystemExit('ClientActivity Stage 1 records changed; refusing unsafe patch')
+              s = s.replace(old, 'private val records = mutableListOf<JSONObject>()', 1)
+              s = s.replace('records.add(Triple(id, passed, observed))', 'records.add(result)', 1)
+              marker = '        val results = synchronized(records) { records.sortedBy { it.first }.toList() }'
+              if s.count(marker) != 1:
+                  raise SystemExit('ClientActivity footer not found')
+              start = s.index(marker)
+              s = s[:start] + '''        val results = synchronized(records) {
+                      records.sortedBy { it.optString("id", "") }.toList()
+                  }
+                  runOnUiThread {
+                      EvidenceScreen.show(this, "SecurityClient • Sandbox / IPC", results)
+                  }
+              }
+          }
+          '''
+              p.write_text('// ASL_VISUAL_EVIDENCE_V1\n' + s, encoding='utf-8')
+              print('Patched ClientActivity to show actual exception details')
+          else:
+              print('ClientActivity already updated')
+
+          # System permission dialog demonstration, separate from P1-P3 automated assertions.
+          DEMO_KT = r'''// ASL_VISUAL_EVIDENCE_V1
+          package org.example.securitylab.client
+
+          import android.Manifest
+          import android.app.Activity
+          import android.os.Bundle
+          import android.widget.TextView
+
+          class PermissionDialogDemoActivity : Activity() {
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+                  setContentView(TextView(this).apply {
+                      text = "SecurityClient\n\nДемонстрация системного запроса CAMERA\n" +
+                          "Разрешение будет запрошено у Android."
+                      textSize = 19f
+                      setPadding(24, 40, 20, 20)
+                  })
+                  requestPermissions(arrayOf(Manifest.permission.CAMERA), 9113)
+              }
+          }
+          '''
+          put('client/src/main/java/org/example/securitylab/client/PermissionDialogDemoActivity.kt', DEMO_KT)
+
+          # Distinct vector launcher icons. Both apps remain ordinary unprivileged APKs.
+          ICONS = {
+              'owner': ('#163F78', '#FFFFFF', 'M48,11 L77,24 L73,62 L48,83 L23,62 L19,24 Z',
+                        'M39,46 L46,54 L61,38'),
+              'client': ('#176E67', '#FFFFFF', 'M24,28 L71,28 L71,68 L24,68 Z',
+                         'M35,40 L60,40 M35,50 L60,50 M35,60 L51,60'),
+          }
+          for role, (background, foreground, figure, strokes) in ICONS.items():
+              xml = f'''<?xml version="1.0" encoding="utf-8"?>
+          <!-- ASL_VISUAL_EVIDENCE_V1 -->
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="96dp" android:height="96dp"
+              android:viewportWidth="96" android:viewportHeight="96">
+              <path android:fillColor="{background}" android:pathData="M0,0 L96,0 L96,96 L0,96 Z" />
+              <path android:fillColor="{foreground}" android:fillAlpha="0.96" android:pathData="{figure}" />
+              <path android:fillColor="@android:color/transparent" android:strokeColor="{background}"
+                  android:strokeWidth="4" android:strokeLineCap="round" android:strokeLineJoin="round"
+                  android:pathData="{strokes}" />
+          </vector>
+          '''
+              # Android vector fillColor must be literal hex, not resource token.
+              xml = xml.replace('android:fillColor="@android:color/transparent"', 'android:fillColor="#00000000"')
+              put(f'{role}/src/main/res/drawable/asl_icon.xml', xml)
+              manifest = Path(f'{role}/src/main/AndroidManifest.xml')
+              original = manifest.read_text(encoding='utf-8')
+              if 'android:icon="@drawable/asl_icon"' not in original:
+                  if original.count('<application ') != 1:
+                      raise SystemExit(f'Unexpected manifest structure {manifest}')
+                  original = original.replace('<application ', '<application android:icon="@drawable/asl_icon" ', 1)
+              if role == 'client' and 'PermissionDialogDemoActivity' not in original:
+                  if original.count('</application>') != 1:
+                      raise SystemExit('Unexpected client manifest end')
+                  original = original.replace('</application>',
+                      '    <activity android:name=".PermissionDialogDemoActivity" android:exported="true" />\n    </application>', 1)
+              # Parse to confirm real Android manifest syntax.
+              ET.fromstring(original)
+              if original != manifest.read_text(encoding='utf-8'):
+                  manifest.write_text(original, encoding='utf-8')
+                  print('Updated manifest:', manifest)
+
+          CAPTURE_PY = r'''# ASL_VISUAL_EVIDENCE_V1
+          """Capture actual emulator UI, not generated/mock screenshots.
+          Only record app displays after confirming a matching Android-side Logcat observation.
+          """
           import json
           import re
-          from textwrap import dedent
-          
-          ROOT = Path('.')
-          README = Path('README.md')
-          RESULTS = Path('results')
-          SHOT = Path('docs/screenshots')
-          SCRIPT = Path('scripts/publish-results.py')
-          EXPECTED = ['S1','S2','S3','S4','S5','P1','P2','P3','F1','F2','F3','K1','K2','K3']
-          
-          # Source data must exist and match the successful, already verified run.
-          reports = {}
-          for api in (33, 36):
-              file = RESULTS / f'latest-api-{api}.json'
-              if not file.is_file():
-                  raise SystemExit(f'Missing required measured report: {file}')
-              data = json.loads(file.read_text(encoding='utf-8'))
-              entries = data.get('results', [])
-              ids = [x.get('id') for x in entries if isinstance(x, dict)]
-              if (int(data.get('api', -1)) != api or data.get('status') != 'PASS'
-                      or ids != EXPECTED or int(data.get('target_sdk', -1)) != 33):
-                  raise SystemExit(f'Unexpected or incomplete report: {file}')
-              if not all(x.get('pass') is True and x.get('observed') == x.get('expected') for x in entries):
-                  raise SystemExit(f'Inconsistent individual outcomes: {file}')
-              reports[api] = {x['id']: x for x in entries}
-          summary_file = RESULTS / 'summary.json'
-          if not summary_file.is_file():
-              raise SystemExit('Missing results/summary.json')
-          summary = json.loads(summary_file.read_text(encoding='utf-8'))
-          if (summary.get('api_33') != 'PASS' or summary.get('api_36') != 'PASS'
-                  or summary.get('expected_scenarios') != EXPECTED):
-              raise SystemExit('summary.json disagrees with the complete 14-scenario report')
-          if not README.is_file() or not SCRIPT.is_file():
-              raise SystemExit('README.md or scripts/publish-results.py not found')
-          
-          # These paths are used only for images that already exist in the repository.
-          def img(filename, alt, width=210):
-              p=SHOT / filename
-              if not p.is_file():
-                  print(f'No image, omitting broken README link: {p}')
-                  return ''
-              return f'<img src="{p.as_posix()}" alt="{alt}" width="{width}">'
-          
-          def table_images(rows):
-              result=['| Материал | Android 13 | Android 16 |','|---|---|---|']
-              for name,a,b in rows:
-                  result.append(f'| {name} | {a or "Нет файла"} | {b or "Нет файла"} |')
-              return '\n'.join(result)
-          
-          scenarios = [
-           ('S1','Чтение собственного приватного файла','Изоляция приложений',
-            'Создать приватный файл средствами SecurityOwner и прочитать его от имени этого же приложения.',
-            'Приложение-владелец успешно считывает записанные тестовые данные.',
-            'ALLOW'),
-           ('S2','Попытка чтения чужого приватного файла','Изоляция приложений',
-            'Сохранить приватный файл в SecurityOwner; из SecurityClient с другим UID попытаться открыть его по прямому пути. Отдельно убедиться, что файл действительно существует.',
-            'Android отклоняет прямой доступ. Зарегистрировано FileNotFoundException, наличие файла подтверждено проверкой исходных данных.',
-            'DENY'),
-           ('S3','Доступ к закрытому ContentProvider','Межприложенное взаимодействие',
-            'SecurityClient выполняет запрос к ContentProvider SecurityOwner, который закрыт для других приложений.',
-            'Запрос отклоняется системой с SecurityException.',
-            'DENY'),
-           ('S4','Доступ к открытому ContentProvider','Межприложенное взаимодействие',
-            'SecurityClient обращается к намеренно открытому тестовому ContentProvider приложения SecurityOwner.',
-            'Запрос разрешён, возвращено ожидаемое тестовое содержимое.',
-            'ALLOW'),
-           ('S5','ContentProvider с проверкой разрешения','Межприложенное взаимодействие',
-            'SecurityClient запрашивает данные ContentProvider, для которого установлено ограничение по разрешению, отсутствующему у клиента.',
-            'Система отклоняет запрос с SecurityException.',
-            'DENY'),
-           ('P1','Камера: разрешение не выдано','Runtime Permissions',
-            'Через ADB отозвать разрешение CAMERA, затем запустить PermissionProbeActivity в SecurityClient и вызвать checkSelfPermission.',
-            'Приложение видит отсутствие разрешения CAMERA.',
-            'DENY'),
-           ('P2','Камера: разрешение выдано','Runtime Permissions',
-            'Через ADB предоставить CAMERA тому же приложению и повторно проверить состояние через checkSelfPermission.',
-            'Приложение фиксирует наличие разрешения CAMERA.',
-            'ALLOW'),
-           ('P3','Камера: разрешение отозвано','Runtime Permissions',
-            'После P2 отозвать CAMERA через ADB, заново запустить Activity и проверить разрешение.',
-            'Приложение фиксирует отсутствие ранее предоставленного разрешения.',
-            'DENY'),
-           ('F1','Чтение собственного файла во внешнем хранилище','Scoped Storage',
-            'Создать файл в собственной app-specific директории внешнего хранилища с помощью getExternalFilesDir и прочитать его тем же приложением.',
-            'Чтение собственных данных разрешено.',
-            'ALLOW'),
-           ('F2','Прямой доступ к файлу другого приложения','Scoped Storage',
-            'SecurityClient пытается напрямую открыть app-specific файл SecurityOwner. Убедиться, что тестовый файл создан и доступен владельцу.',
-            'Прямой доступ отклонён; в журнале зарегистрировано FileNotFoundException.',
-            'DENY'),
-           ('F3','Чтение документа через системный выбор файла','Scoped Storage и Storage Access Framework',
-            'Разместить тестовый документ в Downloads, вызвать из SecurityClient ACTION_OPEN_DOCUMENT, выбрать документ через системный интерфейс и прочитать возвращённый URI через ContentResolver.',
-            'После выбора документа приложение получает URI и успешно читает содержимое.',
-            'ALLOW'),
-           ('K1','Шифрование и расшифрование с Android Keystore','Android Keystore',
-            'Создать ключ AES-256 в Android Keystore, зашифровать тестовую строку в режиме GCM, затем расшифровать и сравнить исходные байты.',
-            'Шифрование и последующее расшифрование выполнены успешно; получены шифртекст и IV.',
-            'ALLOW'),
-           ('K2','Попытка извлечения секретного ключа','Android Keystore',
-            'Для созданного ключа вызвать SecretKey.getEncoded() и проверить KeyInfo.securityLevel.',
-            'getEncoded() возвращает null; экспорт ключа через этот API недоступен. В эмуляторе securityLevel=0 (программная защита).',
-            'DENY'),
-           ('K3','Межприложенная изоляция ключа','Android Keystore',
-            'В SecurityClient попробовать найти и использовать псевдоним ключа, созданного SecurityOwner; отдельно проверить доступ со стороны владельца.',
-            'Ключ недоступен клиенту, но доступен владельцу (положительный контроль).',
-            'DENY'),
-          ]
-          
-          heading = {
-           'S':'Изоляция приложений и IPC — S1–S5',
-           'P':'Управление разрешениями — P1–P3',
-           'F':'Доступ к файлам — F1–F3',
-           'K':'Android Keystore — K1–K3',
-          }
-          
-          intro=dedent('''
-          <!-- ASL_GUIDE_START -->
-          ## Что находится в репозитории
-          
-          Здесь приведены **инструкции и фактические результаты** 14 проверок встроенных механизмов безопасности Android. Это рабочая документация экспериментов, а не текст курсового отчёта.
-          
-          Для испытаний используются два независимых приложения — **SecurityOwner** (создаёт тестовые ресурсы) и **SecurityClient** (проверяет доступ к ним). Приложения не выполняют атаки с root-доступом. Все данные синтетические.
-          
-          ### Условия проведения
-          
-          | Параметр | Значение |
-          |---|---|
-          | Операционная система | Android 13 и Android 16 |
-          | API Level | 33 и 36 соответственно |
-          | `targetSdk` обоих приложений | 33 |
-          | Испытательная среда | Android Emulator, два приложения с разными UID |
-          | Инструменты | ADB, скрипты в `scripts/`, GitHub Actions |
-          | Зафиксированный успешный прогон | [5 ноября 2026 года](https://github.com/mkkazakova/Android-Security-Lab/actions/runs/42021014242) |
-          | Машиночитаемые данные | [`results/latest-api-33.json`](results/latest-api-33.json), [`results/latest-api-36.json`](results/latest-api-36.json), [`results/summary.json`](results/summary.json) |
-          
-          Сравнивается поведение **одних и тех же приложений с targetSdk 33** в двух версиях Android. Эти результаты не позволяют оценить все возможные конфигурации Android или аппаратные свойства конкретного смартфона.
-          
-          ### Как повторить испытания
-          
-          1. Перейти в репозитории в **Actions → Android Security Lab - Complete Experiments**.
-          2. Выбрать ветку `master` и нажать **Run workflow**.
-          3. Дождаться выполнения проверок API 33 и API 36, затем задания публикации результатов.
-          4. Проверить `results/latest-api-33.json`, `results/latest-api-36.json` и `results/summary.json`. У каждого сценария должны присутствовать `expected`, `observed` и `pass`.
-          5. При необходимости получить полные журналы и дополнительные изображения из **Artifacts** соответствующего запуска GitHub Actions.
-          
-          Основной сценарий запуска — `scripts/run-tests.sh`. Скрипты `run-stage1.sh`–`run-stage4.sh` и отдельные Python-модули выполняют последовательные группы проверок. Реальные операции с ресурсами выполняются внутри Android-приложений.
-          
-          **Интерпретация:** `PASS` означает совпадение наблюдения с ожидаемым поведением. `DENY` при тестировании запрета доступа является успешным результатом. Ошибка автоматизации (`ERROR`) сама по себе не подтверждает механизм защиты.
-          
-          ## Проведённые эксперименты
-          ''').strip()
-          lines=[intro]
-          current_group=None
-          for sid,title,group,procedure,observed,expected in scenarios:
-              if sid[0]!=current_group:
-                  current_group=sid[0]
-                  lines.extend(['',f'### {heading[current_group]}',''])
-              detail_a = reports[33][sid]
-              detail_b = reports[36][sid]
-              if detail_a['observed'] != expected or detail_b['observed'] != expected:
-                  raise SystemExit(f'Unexpected report observation for {sid}')
-              lines.extend([
-                 f'#### {sid}. {title}',
-                 f'**Что проверяли:** {group.lower()}.',
-                 f'**Порядок действий:** {procedure}',
-                 f'**Ожидаемый результат:** `{expected}`.',
-                 f'**Наблюдение:** {observed}',
-                 f'**Итог:** Android 13 — **PASS ({detail_a["observed"]})**; Android 16 — **PASS ({detail_b["observed"]})**.',
-                 f'**Подтверждение:** запись `{sid}` в JSON-отчётах [API 33](results/latest-api-33.json) и [API 36](results/latest-api-36.json).',
-                 ''
-              ])
-              if sid=='S5':
-                  lines.extend([
-                      '**Скриншоты приложений при испытаниях Sandbox и IPC:**',
-                      table_images([
-                          ('SecurityOwner', img('stage1-android-13-owner.png','SecurityOwner на Android 13'), img('stage1-android-16-owner.png','SecurityOwner на Android 16')),
-                          ('SecurityClient', img('stage1-android-13-client.png','SecurityClient на Android 13'), img('stage1-android-16-client.png','SecurityClient на Android 16')),
-                      ]),
-                      '',
-                      '*Эти изображения показывают тестовые приложения. Доказательство разрешения или запрета доступа — результаты операций в JSON и журналах.*',
-                      ''
-                  ])
-              if sid=='P3':
-                  lines.extend(['*Разрешение выдаётся и отзывается ADB только для подготовки теста. Фактическое состояние проверяется приложением; работа физической камеры не испытывается.*',''])
-              if sid=='F3':
-                  lines.extend([
-                      '**Скриншоты из испытаний файлового доступа:**',
-                      table_images([
-                          ('SecurityOwner', img('stage3-api-33-owner.png','Owner, API 33'), img('stage3-api-36-owner.png','Owner, API 36')),
-                          ('SecurityClient', img('stage3-api-33-client.png','Client, API 33'), img('stage3-api-36-client.png','Client, API 36')),
-                          ('Системный выбор документа F3', img('stage3-api-33-f3-picker.png','Выбор документа F3, API 33'), img('stage3-api-36-f3-picker.png','Выбор документа F3, API 36')),
-                      ]),
-                      '',
-                      '*F3 фиксирует работу системного выбора документа и доступ после выдачи URI, а не обход защиты файлового хранилища.*',
-                      ''
-                  ])
-              if sid=='K3':
-                  lines.extend(['*Ограничение K1–K3:* `KeyInfo.securityLevel=0` в обоих эмуляторах означает программный уровень защиты. Аппаратные TEE и StrongBox в этих испытаниях не проверялись.',''])
-          
-          lines += [
-              '## Сравнение результатов',
-              '',
-              'В обоих эмуляторах все **14 сценариев завершились успешно** (всего **28 PASS**). В пределах этих конкретных сценариев различий между Android 13 и Android 16 не обнаружено. Это не означает отсутствия изменений в безопасности между версиями Android в целом.',
-              '',
-              'Сводная таблица ниже обновляется при каждом успешном запуске испытаний. Она содержит результаты последнего подтверждённого прогона и ссылку на GitHub Actions.',
-              '',
-              '<!-- ASL_GUIDE_END -->'
-          ]
-          guide='\n'.join(lines).strip()+'\n'
-          
-          # Update a dedicated static area; the existing results and emulator readiness blocks remain untouched.
-          original=README.read_text(encoding='utf-8')
-          start='<!-- ASL_GUIDE_START -->'
-          end='<!-- ASL_GUIDE_END -->'
-          if (start in original) != (end in original):
-              raise SystemExit('README contains broken ASL_GUIDE markers')
-          if start in original:
-              before, tail=original.split(start,1)
-              _, after=tail.split(end,1)
-              updated=before.rstrip()+'\n\n'+guide+'\n'+after.lstrip('\n')
-          else:
-              # Install the guide immediately after the main heading.
-              lines_original=original.splitlines(keepends=True)
-              if not lines_original or not lines_original[0].lstrip().startswith('# '):
-                  raise SystemExit('README.md has an unexpected first heading')
-              updated=lines_original[0].rstrip()+'\n\n'+guide+'\n'+''.join(lines_original[1:]).lstrip('\n')
-          
-          # Keep links to technical docs, remove links to a draft assignment/academic report.
-          links_start='<!-- RESEARCH_DOCS_LINKS_START -->'
-          links_end='<!-- RESEARCH_DOCS_LINKS_END -->'
-          links=dedent('''
-          <!-- RESEARCH_DOCS_LINKS_START -->
-          ## Файлы и дополнительные инструкции
-          
-          - [Подробная методика всех 14 проверок](experiments/test-plan.md)
-          - [Устройство приложений и системы запуска](docs/architecture.md)
-          - [Методика работы с разрешениями](experiments/permissions.md)
-          - [Методика проверки файлового доступа](experiments/storage.md)
-          - [Методика Android Keystore](experiments/keystore.md)
-          - [Результаты в JSON](results/)
-          
-          <!-- RESEARCH_DOCS_LINKS_END -->
-          ''').strip()
-          if (links_start in updated) != (links_end in updated):
-              raise SystemExit('README contains broken links markers')
-          if links_start in updated:
-              before,tail=updated.split(links_start,1)
-              _,after=tail.split(links_end,1)
-              updated=before.rstrip()+'\n\n'+links+'\n'+after.lstrip('\n')
-          else:
-              updated=updated.rstrip()+'\n\n'+links+'\n'
-          
-          # Preserve the existing data block; publisher replaces only these markers.
-          if updated.count('<!-- ANDROID_STAGE1_START -->')!=1 or updated.count('<!-- ANDROID_STAGE1_END -->')!=1:
-              raise SystemExit('Missing or repeated automatic experiment results markers')
-          if updated.count('<!-- ANDROID_READINESS_RESULTS_START -->')!=1 or updated.count('<!-- ANDROID_READINESS_RESULTS_END -->')!=1:
-              raise SystemExit('Missing or repeated emulator readiness markers')
-          
-          # Technical documents match actually completed work, without scientific-report boilerplate.
-          architecture = dedent('''
-          # Структура Android Security Lab
-          
-          ## Компоненты
-          
-          - `owner/` — приложение **SecurityOwner**. Создаёт тестовые файлы и ContentProvider, использует Android Keystore, выполняет контрольные операции от своего UID.
-          - `client/` — независимое приложение **SecurityClient** с другим UID. Выполняет попытки доступа к чужим данным, проверяет состояние CAMERA и доступ к выбранному через системный интерфейс документу.
-          - `scripts/run-stage1.sh` — проверки S1–S5: Sandbox и IPC.
-          - `scripts/run-stage2.sh` — дополнительно P1–P3: Runtime Permissions.
-          - `scripts/run-stage3.sh` и `scripts/storage-tests.py` — дополнительно F1–F3: Scoped Storage.
-          - `scripts/run-stage4.sh` и `scripts/keystore-tests.py` — дополнительно K1–K3: Android Keystore.
-          - `scripts/run-tests.sh` — точка входа для полного запуска всех 14 сценариев.
-          - `scripts/publish-results.py` — обновляет сохранённые JSON, изображения и сводную таблицу README, не перезаписывая постоянные инструкции.
-          - `.github/workflows/android-tests.yml` — сборка двух APK, запуск Android Emulator API 33 и API 36 и публикация результатов.
-          - `results/` — сохранённые сводные JSON для каждого API и итоговая сводка.
-          - `docs/screenshots/` — сохранённые изображения. Дополнительные логи доступны в Artifacts запуска.
-          
-          ## Последовательность испытаний
-          
-          `android-tests.yml` → сборка `owner` и `client` → запуск эмулятора → `scripts/run-tests.sh` → Android-приложения → JSON и скриншоты → `scripts/publish-results.py` → README и `results/`.
-          
-          ## Условия достоверности
-          
-          - Тесты выполняются на Android 13 (API 33) и Android 16 (API 36) с `targetSdk=33` для обоих приложений.
-          - Доступ проверяется из процессов самих приложений, а не от привилегированного пользователя ADB-shell. ADB используется для подготовки среды, выдачи/отзыва разрешения CAMERA и управления испытаниями.
-          - Отказ доступа (`DENY`) является успешным результатом только там, где именно такой отказ ожидался.
-          - Эксперименты не проверяют аппаратную защиту смартфона. Для Android Keystore зафиксирован программный уровень `securityLevel=0`.
-          
-          Подробное описание каждого сценария, порядок действий, ожидаемое поведение и результаты приведены в [README](../README.md).
-          ''').strip()+'\n'
-          
-          tp=['# Методика 14 экспериментов', '',
-              'Все сценарии выполнены на Android 13 (API 33) и Android 16 (API 36), при `targetSdk=33`. Последний проверенный успешный прогон содержит 28 результатов PASS.', '',
-              '## Как повторить', '',
-              'Запустить **Actions → Android Security Lab - Complete Experiments → Run workflow** на ветке `master`. Просмотреть оба задания Android API 33/36 и итоговую публикацию. Результаты — в [`results/`](../results/), журналы — в Artifacts соответствующего запуска.', '',
-              '## Сценарии', '',
-              '| ID | Проверяемое действие | Ожидаемое наблюдение | API 33 | API 36 |',
-              '|---|---|---|---|---|']
-          for sid,title,group,procedure,observed,expected in scenarios:
-              tp.append(f'| [{sid}](../README.md) | {title} | `{expected}` | PASS | PASS |')
-          tp += ['',
-              'Конкретная последовательность действий и пояснение каждого результата приведены в **[README](../README.md)**. Тесты P1–P3 используют ADB для подготовки состояния разрешения, но проверяют его внутри приложения. Эксперимент F3 использует `ACTION_OPEN_DOCUMENT`; K2 подтверждает неэкспортируемость ключа через `getEncoded()`, но не наличие аппаратной защиты.', '',
-              'Дополнительные методики: [Runtime Permissions](permissions.md), [Scoped Storage](storage.md), [Android Keystore](keystore.md).',
-              '']
-          testplan='\n'.join(tp)
-          
-          for file, first in ((Path('docs/architecture.md'),'# Архитектура Android Security Lab'),
-                              (Path('experiments/test-plan.md'),'# Методика экспериментального исследования')):
-              if not file.is_file():
-                  raise SystemExit(f'Expected existing technical document absent: {file}')
-              prior=file.read_text(encoding='utf-8')
-              if first not in prior and not (prior.startswith('# Структура Android Security Lab') if 'architecture' in file.name else prior.startswith('# Методика 14 экспериментов')):
-                  raise SystemExit(f'Unexpected user-edited document, refusing to overwrite: {file}')
-          
-          # Make publisher refuse incomplete artifact sets BEFORE writing/deleting any old report.
-          publisher=SCRIPT.read_text(encoding='utf-8')
-          if 'Managed by project-update.yml' not in publisher:
-              raise SystemExit('Unexpected existing publisher. Refusing to overwrite.')
-          if 'ASL_FINAL_PUBLISH_GUARD' not in publisher:
-              guard=dedent('''
-              # ASL_FINAL_PUBLISH_GUARD: do not replace successful evidence on an incomplete run.
-              for _api in (33, 36):
-                  _p = Path('downloaded') / f'securitylab-api-{_api}' / 'report.json'
-                  if not _p.is_file():
-                      raise SystemExit(f'Missing current test report: {_p}. Keeping last successful snapshot.')
-                  _data = json.loads(_p.read_text(encoding='utf-8'))
-                  _items = _data.get('results', [])
-                  _ids = [r.get('id') for r in _items if isinstance(r, dict)]
-                  _expected = [t['id'] for t in TESTS]
-                  if (int(_data.get('api', -1)) != _api or _data.get('status') != 'PASS'
-                          or _ids != _expected or int(_data.get('target_sdk', -1)) != 33
-                          or not all(r.get('pass') is True and r.get('observed') == r.get('expected') for r in _items)):
-                      raise SystemExit(f'Incomplete/failed current report for API {_api}. Keeping last successful snapshot.')
-          
-              ''')
-              where='for api, version in ((33, \'13\'), (36, \'16\')):'
-              if publisher.count(where)!=1:
-                  raise SystemExit('Cannot locate publisher iteration for safe patch.')
-              publisher=publisher.replace(where,guard+where,1)
-          
-              # If screenshot is absent in the newer run, retain its last valid copy.
-              old='''                  target.unlink(missing_ok=True)
-                            screenshots[(api, kind)] = 'Нет скриншота текущего запуска' '''.rstrip()
-              # Search with indentation robustly; otherwise abort, not silently patch a different publisher.
-              match=re.search(r'(?m)^([ ]*)target\.unlink\(missing_ok=True\)\n\1screenshots\[\(api, kind\)\] = \'Нет скриншота текущего запуска\'',publisher)
-              if not match:
-                  raise SystemExit('Cannot locate screenshot cleanup block in publisher')
-              indent=match.group(1)
-              # Avoid escaped quote issues by using a single-quoted outer f-string and double-quoted HTML attributes.
-              replacement = (indent + 'if target.is_file():\n' +
-                             indent + '    screenshots[(api, kind)] = (\'<img src="\' + target.as_posix() + \'" width="220" alt="\' + kind + \'" >\')\n' +
-                             indent + 'else:\n' +
-                             indent + "    screenshots[(api, kind)] = 'Нет сохранённого скриншота'")
-              publisher=publisher[:match.start()]+replacement+publisher[match.end():]
-          
-          # Only now write the staged documents; no running experiments, no modification of actual measured results.
-          README.write_text(updated.rstrip()+'\n',encoding='utf-8')
-          Path('docs/architecture.md').write_text(architecture,encoding='utf-8')
-          Path('experiments/test-plan.md').write_text(testplan,encoding='utf-8')
-          SCRIPT.write_text(publisher,encoding='utf-8')
-          print('Updated README.md: 14 detailed descriptions and existing evidence blocks preserved')
-          print('Updated docs/architecture.md, experiments/test-plan.md')
-          print('Updated scripts/publish-results.py: guarded publication and retained old screenshots')
-          print('No Android source, test launcher, workflow or results JSON was changed')
-
-          ASL_FINAL_DOCS_GENERATOR
-
-      - name: Validate generated documentation
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 -c "from pathlib import Path; compile(Path('scripts/publish-results.py').read_text(encoding='utf-8'), 'scripts/publish-results.py', 'exec')"
-          python3 - <<'ASL_FINAL_CHECK_PY'
-          import json
+          import subprocess
+          import time
+          import xml.etree.ElementTree as ET
           from pathlib import Path
-          readme=Path('README.md').read_text(encoding='utf-8')
-          for start, end in (('<!-- ASL_GUIDE_START -->','<!-- ASL_GUIDE_END -->'),
-                             ('<!-- ANDROID_STAGE1_START -->','<!-- ANDROID_STAGE1_END -->'),
-                             ('<!-- ANDROID_READINESS_RESULTS_START -->','<!-- ANDROID_READINESS_RESULTS_END -->')):
-              if readme.count(start)!=1 or readme.count(end)!=1:
-                  raise SystemExit(f'Broken or missing README markers: {start}')
-          for label in ('S1','S2','S3','S4','S5','P1','P2','P3','F1','F2','F3','K1','K2','K3'):
-              if f'#### {label}.' not in readme:
-                  raise SystemExit(f'Missing documentation for {label}')
-          if readme.count('**Ожидаемый результат:**')!=14:
-              raise SystemExit('Expected exactly 14 scenario descriptions')
-          for api in (33, 36):
-              report=json.loads(Path(f'results/latest-api-{api}.json').read_text(encoding='utf-8'))
-              if report.get('status')!='PASS' or len(report.get('results',[]))!=14:
-                  raise SystemExit('Stored report was modified unexpectedly')
-          print('Documentation verified: 14 descriptions and two existing successful reports')
-          ASL_FINAL_CHECK_PY
 
-      - name: Commit documentation and publisher
+          OWNER = 'org.example.securitylab.owner'
+          CLIENT = 'org.example.securitylab.client'
+          PERM = 'android.permission.CAMERA'
+          API = subprocess.check_output(
+              ['adb','shell','getprop','ro.build.version.sdk'], text=True
+          ).strip()
+          OUT = Path('results') / f'stage1-api-{API}'
+          REPORT = json.loads((OUT / 'report.json').read_text(encoding='utf-8'))
+          EXPECTED = {r['id']: r for r in REPORT.get('results', [])}
+          LOG = []
+
+
+          def adb(*args, timeout=35, check=True):
+              result = subprocess.run(['adb', *args], text=True, capture_output=True, timeout=timeout)
+              if check and result.returncode:
+                  raise RuntimeError(f'adb {" ".join(args)}: {result.stderr or result.stdout}')
+              return result.stdout
+
+
+          def screenshot(name):
+              path = OUT / name
+              proc = subprocess.run(['adb','exec-out','screencap','-p'],
+                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=25)
+              if proc.returncode or not proc.stdout.startswith(b'\x89PNG\r\n\x1a\n'):
+                  raise RuntimeError(f'No valid screencap for {name}: {proc.stderr[:200]!r}')
+              path.write_bytes(proc.stdout)
+              LOG.append(f'SAVED {name} ({len(proc.stdout)} bytes)')
+              return path
+
+
+          def dump_ui():
+              # Pull actual system UI hierarchy for validation of screenshots.
+              adb('shell','uiautomator','dump','/sdcard/asl_visual.xml', timeout=30)
+              return adb('exec-out','cat','/sdcard/asl_visual.xml', timeout=15)
+
+
+          def click_demo(test_id, package, activity, marker, operation=None):
+              if operation:
+                  adb('shell','pm',operation,package,PERM)
+              adb('shell','am','force-stop',package)
+              adb('logcat','-c')
+              adb('shell','am','start','-W','-n',f'{package}/{activity}',
+                  '--es','experiment_id',test_id)
+              record = None
+              for _ in range(30):
+                  lines = adb('logcat','-d','-v','raw','-s','SecurityLab:I','*:S')
+                  for line in reversed(lines.splitlines()):
+                      if marker in line:
+                          try:
+                              candidate = json.loads(line.split(marker,1)[1])
+                          except json.JSONDecodeError:
+                              continue
+                          if candidate.get('id') == test_id:
+                              record = candidate
+                              break
+                  if record is not None:
+                      break
+                  time.sleep(0.5)
+              if not record or not record.get('pass'):
+                  raise RuntimeError(f'No PASS from actual Android Activity for {test_id}')
+              expected = EXPECTED.get(test_id)
+              if not expected or expected.get('observed') != record.get('observed'):
+                  raise RuntimeError(f'Live observation differs from report for {test_id}')
+              time.sleep(0.6)
+              screenshot(f'evidence-{test_id.lower()}.png')
+
+
+          def capture_launcher():
+              # Both apps have a MAIN/LAUNCHER Activity. Capture the actual app drawer.
+              size = adb('shell','wm','size')
+              dims = re.findall(r'(\d+)x(\d+)', size)
+              if not dims:
+                  raise RuntimeError(f'Unable to determine emulator display size: {size}')
+              width, height = [int(x) for x in dims[-1]]
+              mid = width // 2
+              adb('shell','input','keyevent','KEYCODE_HOME')
+              time.sleep(1.3)
+              for attempt in range(12):
+                  if attempt == 0:
+                      adb('shell','input','swipe',str(mid),str(int(height*.82)),
+                          str(mid),str(int(height*.27)),'480')
+                  else:
+                      adb('shell','input','swipe',str(mid),str(int(height*.77)),
+                          str(mid),str(int(height*.45)),'400')
+                  time.sleep(0.9)
+                  xml = dump_ui()
+                  if 'SecurityOwner' in xml and 'SecurityClient' in xml:
+                      (OUT / 'installed-apps-ui.xml').write_text(xml, encoding='utf-8')
+                      screenshot('installed-apps.png')
+                      return
+              (OUT / 'installed-apps-ui.xml').write_text(xml, encoding='utf-8')
+              raise RuntimeError('Launcher drawer did not show both app labels; no evidence screenshot is claimed')
+
+
+          def camera_dialog():
+              adb('shell','pm','revoke',CLIENT,PERM)
+              adb('shell','pm','clear-permission-flags',CLIENT,PERM,'user-set','user-fixed', check=False)
+              adb('shell','am','force-stop',CLIENT)
+              adb('shell','am','start','-W','-n',f'{CLIENT}/.PermissionDialogDemoActivity')
+              time.sleep(1.3)
+              xml = dump_ui()
+              (OUT / 'camera-permission-ui.xml').write_text(xml, encoding='utf-8')
+              # Verify a real OS permission controller dialog rather than the app's own UI.
+              if 'permissioncontroller' not in xml.lower() and 'permission_allow' not in xml.lower():
+                  raise RuntimeError('System permission dialog not detected in UI hierarchy')
+              screenshot('camera-permission-dialog.png')
+              adb('shell','input','keyevent','KEYCODE_BACK',check=False)
+
+
+          if REPORT.get('status') != 'PASS' or len(EXPECTED) != 14:
+              raise SystemExit('Capture requires a complete successful run of 14 experiments')
+
+          # Screenshots are optional evidence, never substitute for the actual 14 assertions.
+          for label, operation in [
+              ('installed apps', capture_launcher),
+              ('system CAMERA dialog', camera_dialog),
+          ]:
+              try:
+                  operation()
+                  LOG.append(f'OK {label}')
+              except Exception as exc:
+                  LOG.append(f'WARNING {label}: {exc}')
+                  print(f'WARNING visual capture: {label}: {exc}', flush=True)
+
+          for test_id, package, activity, marker, operation in [
+              ('P1', CLIENT,'.PermissionProbeActivity','ASL_PERMISSION_RESULT:', 'revoke'),
+              ('P2', CLIENT,'.PermissionProbeActivity','ASL_PERMISSION_RESULT:', 'grant'),
+              ('P3', CLIENT,'.PermissionProbeActivity','ASL_PERMISSION_RESULT:', 'revoke'),
+              ('F1', OWNER,'.StorageProbeActivity','ASL_STORAGE_RESULT:', None),
+              ('F2', CLIENT,'.StorageProbeActivity','ASL_STORAGE_RESULT:', None),
+              ('K1', OWNER,'.KeystoreProbeActivity','ASL_KEYSTORE_RESULT:', None),
+              ('K2', OWNER,'.KeystoreProbeActivity','ASL_KEYSTORE_RESULT:', None),
+              ('K3', CLIENT,'.KeystoreProbeActivity','ASL_KEYSTORE_RESULT:', None),
+          ]:
+              try:
+                  click_demo(test_id,package,activity,marker,operation)
+              except Exception as exc:
+                  LOG.append(f'WARNING evidence {test_id}: {exc}')
+                  print(f'WARNING {test_id}: {exc}', flush=True)
+
+          (OUT / 'visual-evidence-log.txt').write_text('\n'.join(LOG)+'\n', encoding='utf-8')
+          print('Visual evidence summary:\n'+'\n'.join(LOG), flush=True)
+          '''
+          put('scripts/capture-visual-evidence.py', CAPTURE_PY)
+
+          runner=Path('scripts/run-tests.sh')
+          s=runner.read_text(encoding='utf-8')
+          if 'capture-visual-evidence.py' not in s:
+              if 'bash scripts/run-stage4.sh' not in s:
+                  raise SystemExit('Unexpected test runner; refusing to edit')
+              s=s.rstrip()+'\n# ASL_VISUAL_EVIDENCE_V1: record screenshots after validated full run\npython3 scripts/capture-visual-evidence.py\n'
+              runner.write_text(s,encoding='utf-8')
+              print('Updated run-tests.sh to capture evidence')
+
+          # Permanent screenshot gallery is separate from the auto-generated results section.
+          README=Path('README.md')
+          readme=README.read_text(encoding='utf-8')
+          readme=readme.replace('Это рабочая документация экспериментов, а не текст курсового отчёта.', '')
+          intro='''<!-- ASL_VISUAL_INTRO_START -->
+          ## Приложения и подтверждающие изображения
+
+          **SecurityOwner** и **SecurityClient** — два обычных Android-приложения (APK), установленные в Android Emulator. Они имеют разные UID; операции выполняются через стандартные Android API. Экраны показывают наблюдения приложений, а системные окна — отдельно, когда Android действительно их предоставляет.
+
+          <!-- ASL_VISUAL_GALLERY_START -->
+          Изображения будут добавлены после полного запуска испытаний.
+          <!-- ASL_VISUAL_GALLERY_END -->
+          <!-- ASL_VISUAL_INTRO_END -->'''
+          if '<!-- ASL_VISUAL_INTRO_START -->' not in readme:
+              first=readme.split('\n',1)
+              if len(first)<2 or not first[0].startswith('# '):
+                  raise SystemExit('Unexpected README title')
+              readme=first[0]+'\n\n'+intro+'\n\n'+first[1]
+          if '<!-- ASL_VISUAL_GALLERY_START -->' not in readme:
+              raise SystemExit('Missing README visual gallery markers')
+          README.write_text(readme,encoding='utf-8')
+
+          PUBLISH_EXTENSION = r'''
+          # ASL_VISUAL_EVIDENCE_V1 - extend successful result publication with verified UI captures.
+          # This code runs after the existing guarded publisher. It never alters the measured JSON.
+          from pathlib import Path as _ASLPath
+          _ASL_SRC = _ASLPath('downloaded')
+          _ASL_DST = _ASLPath('docs/screenshots')
+          _ASL_DST.mkdir(parents=True, exist_ok=True)
+          _ASL_NAMES = (
+              'installed-apps.png', 'camera-permission-dialog.png',
+              'evidence-p1.png','evidence-p2.png','evidence-p3.png',
+              'evidence-f1.png','evidence-f2.png',
+              'evidence-k1.png','evidence-k2.png','evidence-k3.png',
+          )
+          for _api in (33, 36):
+              _folder = _ASL_SRC / f'securitylab-api-{_api}'
+              for _name in _ASL_NAMES:
+                  _src = _folder / _name
+                  _dst = _ASL_DST / f'api-{_api}-{_name}'
+                  if _src.is_file() and _src.read_bytes().startswith(b'\x89PNG\r\n\x1a\n'):
+                      _dst.write_bytes(_src.read_bytes())
+                      print(f'Published system/app screenshot: {_dst}')
+                  elif _dst.is_file():
+                      print(f'Retaining last verified screenshot: {_dst}')
+
+
+          # Refresh legacy Stage 1 image references as well: these are real, newly
+          # captured Owner/Client screens, not stale PASS-only screenshots.
+          for _api, _version in ((33, '13'), (36, '16')):
+              for _role in ('owner', 'client'):
+                  _src = _ASL_SRC / f'securitylab-api-{_api}' / f'{_role}.png'
+                  _dst = _ASL_DST / f'stage1-android-{_version}-{_role}.png'
+                  if _src.is_file() and _src.read_bytes().startswith(b'\x89PNG\r\n\x1a\n'):
+                      _dst.write_bytes(_src.read_bytes())
+                      print(f'Refreshed Stage 1 UI: {_dst}')
+
+
+          def _asl_img(api, name, alt):
+              _p = _ASL_DST / f'api-{api}-{name}'
+              return (f'<img src="{_p.as_posix()}" width="245" alt="{alt}">'
+                      if _p.is_file() else 'Нет подтверждённого изображения')
+
+
+          _asl_rows = [
+              ('Установленные приложения в системном меню', 'installed-apps.png'),
+              ('Системный запрос доступа к CAMERA', 'camera-permission-dialog.png'),
+              ('P1: разрешение CAMERA отсутствует', 'evidence-p1.png'),
+              ('P2: разрешение CAMERA предоставлено', 'evidence-p2.png'),
+              ('P3: разрешение CAMERA отозвано', 'evidence-p3.png'),
+              ('F1: чтение собственного файла', 'evidence-f1.png'),
+              ('F2: запрет чтения чужого файла', 'evidence-f2.png'),
+              ('K1: шифрование и расшифрование', 'evidence-k1.png'),
+              ('K2: отказ в экспорте ключа', 'evidence-k2.png'),
+              ('K3: межприложенная изоляция ключа', 'evidence-k3.png'),
+          ]
+          _asl_lines = [
+              '<!-- ASL_VISUAL_GALLERY_START -->',
+              '| Наблюдение | Android 13 | Android 16 |',
+              '|---|---|---|',
+          ]
+          for _title, _name in _asl_rows:
+              _asl_lines.append(
+                  f'| {_title} | {_asl_img(33, _name, _title + " API 33")} | '
+                  f'{_asl_img(36, _name, _title + " API 36")} |'
+              )
+          _asl_lines += [
+              '',
+              'S1 и S2–S5: реальные результаты операций показаны на экранах Owner/Client ниже; '
+              'ошибки Android дополнительно подтверждаются `detail` в JSON и Logcat. '
+              'F3: подлинный системный выбор документа показан в разделе файловых испытаний.',
+              '',
+              'Для отказов в доступе Android не всегда показывает системное окно: '
+              'приложение получает исключение или ответ API. '
+              'Диагностические экраны отображают именно эти ответы, а не системные уведомления.',
+              '<!-- ASL_VISUAL_GALLERY_END -->',
+          ]
+          _asl_readme = _ASLPath('README.md')
+          _asl_text = _asl_readme.read_text(encoding='utf-8')
+          _asl_start = '<!-- ASL_VISUAL_GALLERY_START -->'
+          _asl_end = '<!-- ASL_VISUAL_GALLERY_END -->'
+          if _asl_text.count(_asl_start)!=1 or _asl_text.count(_asl_end)!=1:
+              raise SystemExit('Cannot update visual gallery: README markers missing or duplicated')
+          _asl_before, _asl_rest = _asl_text.split(_asl_start,1)
+          _, _asl_after = _asl_rest.split(_asl_end,1)
+          _asl_new = _asl_before + '\n'.join(_asl_lines) + _asl_after
+          _asl_new = _asl_new.replace('Это рабочая документация экспериментов, а не текст курсового отчёта.', '')
+          _asl_readme.write_text(_asl_new, encoding='utf-8')
+          '''
+
+          p = Path('scripts/publish-results.py')
+          s = p.read_text(encoding='utf-8')
+          if 'ASL_VISUAL_EVIDENCE_V1' not in s:
+              if 'ASL_FINAL_PUBLISH_GUARD' not in s:
+                  raise SystemExit('Publisher guard not found; refusing to patch unrecognized publisher')
+              p.write_text(s.rstrip()+'\n'+PUBLISH_EXTENSION, encoding='utf-8')
+              print('Updated publisher with visual evidence gallery')
+
+          print('ASL_VISUAL_EVIDENCE_V1 generated sources; 14 test assertions unchanged.')
+          ASL_VISUAL_UPDATE_PY
+
+      - name: Verify source compatibility
         shell: bash
         run: |
           set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -- README.md docs/architecture.md experiments/test-plan.md scripts/publish-results.py
+          sha256sum --check /tmp/asl-verified-results.sha256
+          bash -n scripts/run-tests.sh
+          python3 - <<'ASL_VERIFY_VISUAL'
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+          for p in [Path('scripts/capture-visual-evidence.py'), Path('scripts/publish-results.py')]:
+              compile(p.read_text(encoding='utf-8'), str(p), 'exec')
+          for role in ('owner','client'):
+              src=Path(role)/'src/main'
+              ET.parse(src/'AndroidManifest.xml')
+              ET.parse(src/'res/drawable/asl_icon.xml')
+              if not (src/'java/org/example/securitylab'/role/'EvidenceScreen.kt').is_file():
+                  raise SystemExit(f'EvidenceScreen.kt missing in {role}')
+          guide=Path('README.md').read_text(encoding='utf-8')
+          if guide.count('<!-- ASL_VISUAL_GALLERY_START -->') != 1:
+              raise SystemExit('README missing image gallery')
+          if 'Это рабочая документация экспериментов, а не текст курсового отчёта.' in guide:
+              raise SystemExit('Unwanted phrase still present')
+          print('Android source/XML/Python/README verification: OK')
+          ASL_VERIFY_VISUAL
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+
+      - name: Install Android build platform
+        shell: bash
+        run: sdkmanager 'platforms;android-36' 'build-tools;35.0.0'
+
+      - name: Build both Android apps before committing
+        shell: bash
+        run: ./gradlew :owner:assembleDebug :client:assembleDebug --no-daemon --stacktrace
+
+      - name: Commit visual updates
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- README.md
+          git add -- owner/src/main/AndroidManifest.xml client/src/main/AndroidManifest.xml
+          git add -- owner/src/main/java/org/example/securitylab/owner/OwnerActivity.kt
+          git add -- client/src/main/java/org/example/securitylab/client/ClientActivity.kt
+          git add -- client/src/main/java/org/example/securitylab/client/PermissionProbeActivity.kt
+          git add -- owner/src/main/java/org/example/securitylab/owner/StorageProbeActivity.kt
+          git add -- client/src/main/java/org/example/securitylab/client/StorageProbeActivity.kt
+          git add -- owner/src/main/java/org/example/securitylab/owner/KeystoreProbeActivity.kt
+          git add -- client/src/main/java/org/example/securitylab/client/KeystoreProbeActivity.kt
+          git add -- owner/src/main/java/org/example/securitylab/owner/EvidenceScreen.kt
+          git add -- client/src/main/java/org/example/securitylab/client/EvidenceScreen.kt
+          git add -- client/src/main/java/org/example/securitylab/client/PermissionDialogDemoActivity.kt
+          git add -- owner/src/main/res/drawable/asl_icon.xml client/src/main/res/drawable/asl_icon.xml
+          git add -- scripts/run-tests.sh scripts/capture-visual-evidence.py scripts/publish-results.py
           if git diff --cached --quiet; then
-            echo "Final documentation already up to date."
+            echo 'Visual update is already applied.'
           else
-            git commit -m "docs: complete 14 Android security experiment guides [skip ci]"
+            git commit -m 'feat: show real Android API observations and capture UI evidence [skip ci]'
             git push origin "HEAD:${{ github.event.repository.default_branch }}"
           fi
-
-      - name: ASL_FINAL_DOCS_END
-        shell: bash
-        run: |
-          set -euo pipefail
-          git status --short
-          test -z "$(git status --porcelain)"
-          git show --format= --name-only HEAD | head -30
-          echo "Final documentation update completed."
+          sha256sum --check /tmp/asl-verified-results.sha256
+          echo 'Completed: source changed; existing test results were preserved.'
