@@ -31,7 +31,7 @@
 <!-- ANDROID_STAGE1_START -->
 ## Экспериментальные результаты Android Security Lab
 
-Обновлено: **2026-11-05 11:06 UTC**. [Запуск GitHub Actions](https://github.com/mkkazakova/Android-Security-Lab/actions/runs/42015734525).
+Обновлено: **2026-11-05 11:20 UTC**. [Запуск GitHub Actions](https://github.com/mkkazakova/Android-Security-Lab/actions/runs/42017469126).
 
 | Проверка | Android 13 (API 33) | Android 16 (API 36) |
 |---|---|---|
@@ -63,7 +63,7 @@
 | P3 | CAMERA state checked inside SecurityClient | CAMERA state checked inside SecurityClient |
 | F1 | Read own app-specific external file via getExternalFilesDir | Read own app-specific external file via getExternalFilesDir |
 | F2 | Direct cross-app read rejected: FileNotFoundException; F1 verifies fixture | Direct cross-app read rejected: FileNotFoundException; F1 verifies fixture |
-| F3 | No application-side result for F3 | No application-side result for F3 |
+| F3 | No application-side result for F3 after picker UI automation; inspect f3-ui.xml, f3-last-screen.png, f3-debug.log | No application-side result for F3 after picker UI automation; inspect f3-ui.xml, f3-last-screen.png, f3-debug.log |
 
 ### Скриншоты из Android Emulator
 
