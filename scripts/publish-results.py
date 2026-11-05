@@ -18,6 +18,21 @@ RESULTS.mkdir(parents=True, exist_ok=True)
 reports = {}
 screenshots = {}
 
+
+# ASL_FINAL_PUBLISH_GUARD: do not replace successful evidence on an incomplete run.
+for _api in (33, 36):
+    _p = Path('downloaded') / f'securitylab-api-{_api}' / 'report.json'
+    if not _p.is_file():
+        raise SystemExit(f'Missing current test report: {_p}. Keeping last successful snapshot.')
+    _data = json.loads(_p.read_text(encoding='utf-8'))
+    _items = _data.get('results', [])
+    _ids = [r.get('id') for r in _items if isinstance(r, dict)]
+    _expected = [t['id'] for t in TESTS]
+    if (int(_data.get('api', -1)) != _api or _data.get('status') != 'PASS'
+            or _ids != _expected or int(_data.get('target_sdk', -1)) != 33
+            or not all(r.get('pass') is True and r.get('observed') == r.get('expected') for r in _items)):
+        raise SystemExit(f'Incomplete/failed current report for API {_api}. Keeping last successful snapshot.')
+
 for api, version in ((33, '13'), (36, '16')):
     folder = Path('downloaded') / f'securitylab-api-{api}'
     try:
@@ -39,8 +54,10 @@ for api, version in ((33, '13'), (36, '16')):
             shutil.copyfile(source, target)
             screenshots[(api, kind)] = f'<img src="{target.as_posix()}" width="220" alt="{kind}, Android {version}">'
         else:
-            target.unlink(missing_ok=True)
-            screenshots[(api, kind)] = 'Нет скриншота текущего запуска'
+            if target.is_file():
+                screenshots[(api, kind)] = ('<img src="' + target.as_posix() + '" width="220" alt="' + kind + '" >')
+            else:
+                screenshots[(api, kind)] = 'Нет сохранённого скриншота'
 
 
 def row_for(api, test_id):
