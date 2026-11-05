@@ -14,5 +14,6 @@
             </intent-filter>
         </activity>
         <activity android:name=".PermissionProbeActivity" android:exported="true" />
+            <activity android:name=".StorageProbeActivity" android:exported="true" />
     </application>
 </manifest>
