@@ -218,7 +218,7 @@
 <!-- ANDROID_STAGE1_START -->
 ## Экспериментальные результаты Android Security Lab
 
-Обновлено: **2026-11-05 11:45 UTC**. [Запуск GitHub Actions](https://github.com/mkkazakova/Android-Security-Lab/actions/runs/42021014242).
+Обновлено: **2026-11-05 15:51 UTC**. [Запуск GitHub Actions](https://github.com/mkkazakova/Android-Security-Lab/actions/runs/42058531623).
 
 | Проверка | Android 13 (API 33) | Android 16 (API 36) |
 |---|---|---|
