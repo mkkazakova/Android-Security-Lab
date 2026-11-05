@@ -1,0 +1,88 @@
+{
+  "stage": "sandbox_ipc_permissions_storage",
+  "api": 36,
+  "android_release": "16",
+  "target_sdk": 33,
+  "fixture_verified_from_owner_identity": true,
+  "status": "FAIL",
+  "results": [
+    {
+      "id": "S1",
+      "expected": "ALLOW",
+      "observed": "ALLOW",
+      "pass": true,
+      "detail": "Own private file created and read via application context"
+    },
+    {
+      "id": "S2",
+      "expected": "DENY",
+      "observed": "DENY",
+      "pass": true,
+      "detail": "Direct access rejected: FileNotFoundException; host verifies file exists"
+    },
+    {
+      "id": "S3",
+      "expected": "DENY",
+      "observed": "DENY",
+      "pass": true,
+      "detail": "Framework rejected query: SecurityException"
+    },
+    {
+      "id": "S4",
+      "expected": "ALLOW",
+      "observed": "ALLOW",
+      "pass": true,
+      "detail": "Expected test data returned from provider"
+    },
+    {
+      "id": "S5",
+      "expected": "DENY",
+      "observed": "DENY",
+      "pass": true,
+      "detail": "Framework rejected query: SecurityException"
+    },
+    {
+      "id": "P1",
+      "expected": "DENY",
+      "observed": "DENY",
+      "pass": true,
+      "detail": "CAMERA state checked inside SecurityClient"
+    },
+    {
+      "id": "P2",
+      "expected": "ALLOW",
+      "observed": "ALLOW",
+      "pass": true,
+      "detail": "CAMERA state checked inside SecurityClient"
+    },
+    {
+      "id": "P3",
+      "expected": "DENY",
+      "observed": "DENY",
+      "pass": true,
+      "detail": "CAMERA state checked inside SecurityClient"
+    },
+    {
+      "id": "F1",
+      "expected": "ALLOW",
+      "observed": "ALLOW",
+      "pass": true,
+      "detail": "Read own app-specific external file via getExternalFilesDir"
+    },
+    {
+      "id": "F2",
+      "expected": "DENY",
+      "observed": "DENY",
+      "pass": true,
+      "detail": "Direct cross-app read rejected: FileNotFoundException; F1 verifies fixture"
+    },
+    {
+      "id": "F3",
+      "expected": "ALLOW",
+      "observed": "ERROR",
+      "pass": false,
+      "detail": "No application-side result for F3"
+    }
+  ],
+  "permissions_control_method": "ADB pm grant/revoke; checkSelfPermission inside application"
+}
