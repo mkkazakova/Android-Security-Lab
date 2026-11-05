@@ -1,4 +1,4 @@
-name: Android Security Lab - Update Project (Stage 3)
+name: Android Security Lab - Update Project (Stage 4)
 
 on:
   workflow_dispatch:
@@ -12,812 +12,503 @@ concurrency:
 
 jobs:
   update-project:
-    name: Add Scoped Storage experiments F1-F3
+    name: Add Android Keystore experiments K1-K3
     if: ${{ github.ref_name == github.event.repository.default_branch }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      - name: Checkout repository
+      - name: Checkout default branch
         uses: actions/checkout@v6
         with:
           ref: ${{ github.event.repository.default_branch }}
 
-      - name: Create or update Stage 3 source files
+      - name: Generate Stage 4 files without modifying other workflows
         shell: bash
         run: |
           set -euo pipefail
 
-          # Fail before modifying files if the YAML was pasted incompletely.
-          # The previous truncated copy mistakenly reported success after a
-          # here-document reached EOF inside the second Kotlin file.
-          python3 - <<'PY_PREFLIGHT'
+          # Detect a truncated paste BEFORE creating anything.
+          python3 - <<'STAGE4_PREFLIGHT_PY'
           from pathlib import Path
-          current = Path('.github/workflows/project-update.yml').read_text(encoding='utf-8')
-          markers = (
-              'STAGE3_CLIENTSTORAGEPROBEACTIVITY_KT',
-              'STAGE3_STORAGE_TESTS_PY',
-              'STAGE3_RUN_TESTS_SH',
-              'STAGE3_PUBLISH_RESULTS_PY',
-              'STAGE3_STORAGE_MD',
-              'PY_MANIFEST',
-              'Commit only ordinary source and documentation files',
+          workflow = Path('.github/workflows/project-update.yml').read_text(encoding='utf-8')
+          required = (
+              'STAGE4_OWNER_KT', 'STAGE4_CLIENT_KT',
+              'STAGE4_KEYSTORE_PY', 'STAGE4_RUN_STAGE4_SH',
+              'STAGE4_RUN_TESTS_SH', 'STAGE4_DOC_MD',
+              'STAGE4_CATALOG_PY', 'STAGE4_MANIFEST_PY',
+              'Verify Stage 4 commit',
           )
-          missing = [name for name in markers if name not in current]
-          if missing or len(current) < 26000:
-              raise SystemExit(
-                  'Incomplete Stage 3 workflow. Replace its ENTIRE contents. '
-                  f'Missing: {missing}; current size: {len(current)} characters.'
-              )
-          print('Stage 3 workflow completeness: OK')
-          PY_PREFLIGHT
+          missing = [x for x in required if workflow.count(x) < 2 and x != 'Verify Stage 4 commit']
+          if 'Verify Stage 4 commit' not in workflow or missing or len(workflow) < 12000:
+              raise SystemExit(f'Incomplete Stage 4 workflow. Missing: {missing}; length={len(workflow)}')
+          print('Stage 4 workflow completeness: OK')
+          STAGE4_PREFLIGHT_PY
 
-          test -f owner/src/main/AndroidManifest.xml
-          test -f client/src/main/AndroidManifest.xml
-          test -f scripts/run-stage1.sh
-          test -f scripts/run-stage2.sh
+          for source in \
+              owner/src/main/AndroidManifest.xml \
+              client/src/main/AndroidManifest.xml \
+              scripts/run-stage3.sh \
+              scripts/run-tests.sh \
+              scripts/publish-results.py \
+              experiments/catalog.json; do
+            test -s "$source" || { echo "Missing Stage 3 dependency: $source" >&2; exit 1; }
+          done
 
           write_managed() {
-            local dest="$1" marker="$2" tmp
-            tmp="$(mktemp)"
-            cat > "$tmp"
+            local dest="$1" marker="$2" temp
+            temp="$(mktemp)"
+            cat > "$temp"
             if [ -f "$dest" ] && ! grep -Fq "$marker" "$dest"; then
               echo "Refusing to overwrite unmanaged file: $dest" >&2
-              rm -f "$tmp"
+              rm -f "$temp"
               return 1
             fi
             mkdir -p "$(dirname "$dest")"
-            if [ ! -f "$dest" ] || ! cmp -s "$dest" "$tmp"; then
-              mv "$tmp" "$dest"
-              echo "Updated $dest"
+            if [ -f "$dest" ] && cmp -s "$dest" "$temp"; then
+              echo "Unchanged: $dest"
+              rm -f "$temp"
             else
-              rm -f "$tmp"
-              echo "Unchanged $dest"
+              mv "$temp" "$dest"
+              echo "Updated: $dest"
             fi
           }
 
-          write_managed "owner/src/main/java/org/example/securitylab/owner/StorageProbeActivity.kt" 'Managed by project-update.yml' <<'STAGE3_OWNERSTORAGEPROBEACTIVITY_KT'
-          // Managed by project-update.yml - Stage 3
+          write_managed "owner/src/main/java/org/example/securitylab/owner/KeystoreProbeActivity.kt" 'Managed by project-update.yml' <<'STAGE4_OWNER_KT'
+          // Managed by project-update.yml - Stage 4 Android Keystore
           package org.example.securitylab.owner
 
           import android.app.Activity
           import android.os.Bundle
+          import android.security.keystore.KeyGenParameterSpec
+          import android.security.keystore.KeyInfo
+          import android.security.keystore.KeyProperties
           import android.util.Log
           import android.widget.TextView
           import org.json.JSONObject
-          import java.io.File
+          import java.security.KeyStore
+          import javax.crypto.Cipher
+          import javax.crypto.KeyGenerator
+          import javax.crypto.SecretKey
+          import javax.crypto.SecretKeyFactory
+          import javax.crypto.spec.GCMParameterSpec
 
-          class StorageProbeActivity : Activity() {
+          class KeystoreProbeActivity : Activity() {
+              private val alias = "asl_stage4_owner_aes"
+              private val sample = "ASL_STAGE4_K1_AES_GCM_PAYLOAD"
+
               override fun onCreate(savedInstanceState: Bundle?) {
                   super.onCreate(savedInstanceState)
-                  val expected = "ALLOW"
+                  val scenario = intent.getStringExtra("experiment_id") ?: "UNKNOWN"
                   var observed = "ERROR"
                   var detail = ""
+                  var securityLevel: String? = null
+                  val expected = if (scenario == "K2") "DENY" else "ALLOW"
+
                   try {
-                      val dir = getExternalFilesDir(null) ?: error("External app-specific directory is unavailable")
-                      val fixture = File(dir, "ASL_OWNER_EXTERNAL_FIXTURE.txt")
-                      fixture.writeText("ASL_STAGE3_OWNER_FIXTURE")
-                      val content = fixture.readText()
-                      observed = if (content == "ASL_STAGE3_OWNER_FIXTURE") "ALLOW" else "INCORRECT_DATA"
-                      detail = "Read own app-specific external file via getExternalFilesDir"
+                      val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+                      when (scenario) {
+                          "K1" -> {
+                              if (!store.containsAlias(alias)) {
+                                  val generator = KeyGenerator.getInstance(
+                                      KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore"
+                                  )
+                                  val spec = KeyGenParameterSpec.Builder(
+                                      alias,
+                                      KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
+                                  )
+                                      .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                                      .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                                      .setKeySize(256)
+                                      .build()
+                                  generator.init(spec)
+                                  generator.generateKey()
+                              }
+                              val key = store.getKey(alias, null) as? SecretKey
+                                  ?: error("Owner key missing after generation")
+                              val encrypt = Cipher.getInstance("AES/GCM/NoPadding")
+                              encrypt.init(Cipher.ENCRYPT_MODE, key)
+                              val ciphertext = encrypt.doFinal(sample.toByteArray(Charsets.UTF_8))
+                              val iv = encrypt.iv ?: error("GCM IV unavailable")
+                              val decrypt = Cipher.getInstance("AES/GCM/NoPadding")
+                              decrypt.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(128, iv))
+                              val plaintext = decrypt.doFinal(ciphertext).toString(Charsets.UTF_8)
+                              observed = if (plaintext == sample && iv.isNotEmpty()) "ALLOW" else "INCORRECT_DATA"
+                              detail = "AES-256/GCM encrypt-decrypt round-trip; ciphertext and IV generated in app"
+                          }
+                          "K2" -> {
+                              val key = store.getKey(alias, null) as? SecretKey
+                                  ?: error("Owner key missing; K1 must run first")
+                              val encoded = key.encoded
+                              observed = if (encoded == null) "DENY" else "ALLOW"
+                              detail = "SecretKey.getEncoded()=" +
+                                  (if (encoded == null) "null" else "non-null") +
+                                  "; export via JCA denied only when null"
+                              try {
+                                  val factory = SecretKeyFactory.getInstance("AES", "AndroidKeyStore")
+                                  val info = factory.getKeySpec(key, KeyInfo::class.java) as KeyInfo
+                                  securityLevel = "KeyInfo.securityLevel=" + info.securityLevel
+                                  detail += "; " + securityLevel
+                              } catch (e: Exception) {
+                                  detail += "; security level not established: " + e.javaClass.simpleName
+                              }
+                          }
+                          "K3_CONTROL" -> {
+                              val key = store.getKey(alias, null) as? SecretKey
+                              observed = if (store.containsAlias(alias) && key != null) "ALLOW" else "DENY"
+                              detail = "Owner can still resolve original alias after cross-app negative test"
+                          }
+                          else -> detail = "Unknown experiment ID"
+                      }
                   } catch (e: Exception) {
                       detail = "${e.javaClass.simpleName}: ${e.message}"
                   }
-                  val passed = observed == expected
+
                   val result = JSONObject()
-                      .put("id", "F1").put("expected", expected)
-                      .put("observed", observed).put("pass", passed)
+                      .put("id", scenario)
+                      .put("expected", expected)
+                      .put("observed", observed)
+                      .put("pass", observed == expected)
                       .put("detail", detail)
-                  Log.i("SecurityLab", "ASL_STORAGE_RESULT:$result")
+                  if (securityLevel != null) result.put("security_level", securityLevel)
+                  Log.i("SecurityLab", "ASL_KEYSTORE_RESULT:$result")
                   setContentView(TextView(this).apply {
-                      text = "Storage F1: $observed"
+                      text = "Keystore $scenario: $observed"
                       textSize = 23f
+                      setPadding(24, 42, 20, 20)
                   })
               }
           }
-          STAGE3_OWNERSTORAGEPROBEACTIVITY_KT
-          write_managed "client/src/main/java/org/example/securitylab/client/StorageProbeActivity.kt" 'Managed by project-update.yml' <<'STAGE3_CLIENTSTORAGEPROBEACTIVITY_KT'
-          // Managed by project-update.yml - Stage 3
+          STAGE4_OWNER_KT
+
+          write_managed "client/src/main/java/org/example/securitylab/client/KeystoreProbeActivity.kt" 'Managed by project-update.yml' <<'STAGE4_CLIENT_KT'
+          // Managed by project-update.yml - Stage 4 Android Keystore
           package org.example.securitylab.client
 
           import android.app.Activity
-          import android.content.Intent
-          import android.net.Uri
           import android.os.Bundle
-          import android.os.Environment
-          import android.provider.DocumentsContract
           import android.util.Log
           import android.widget.TextView
           import org.json.JSONObject
-          import java.io.File
-          import java.io.FileNotFoundException
+          import java.security.KeyStore
 
-          class StorageProbeActivity : Activity() {
-              private val requestOpen = 8301
-
+          class KeystoreProbeActivity : Activity() {
               override fun onCreate(savedInstanceState: Bundle?) {
                   super.onCreate(savedInstanceState)
-                  when (intent.getStringExtra("experiment_id")) {
-                      "F2" -> checkCrossAppRead()
-                      "F3" -> openDocumentPicker()
-                      else -> emit("UNKNOWN", "ALLOW", "ERROR", "Unknown experiment ID")
-                  }
-              }
-
-              private fun checkCrossAppRead() {
+                  val alias = "asl_stage4_owner_aes"
                   var observed = "ERROR"
                   var detail = ""
                   try {
-                      val path = File(
-                          Environment.getExternalStorageDirectory(),
-                          "Android/data/org.example.securitylab.owner/files/ASL_OWNER_EXTERNAL_FIXTURE.txt"
-                      )
-                      val data = path.readText()
-                      observed = if (data == "ASL_STAGE3_OWNER_FIXTURE") "ALLOW" else "INCORRECT_DATA"
-                      detail = "Direct cross-app read unexpectedly returned content"
-                  } catch (e: FileNotFoundException) {
-                      observed = "DENY"
-                      detail = "Direct cross-app read rejected: FileNotFoundException; F1 verifies fixture"
-                  } catch (e: SecurityException) {
-                      observed = "DENY"
-                      detail = "Direct cross-app read rejected: SecurityException; F1 verifies fixture"
+                      val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+                      val isVisible = store.containsAlias(alias)
+                      val retrieved = store.getKey(alias, null)
+                      observed = if (!isVisible && retrieved == null) "DENY" else "ALLOW"
+                      detail = "Client UID: alias visible=$isVisible, key accessible=${retrieved != null}"
                   } catch (e: Exception) {
                       detail = "${e.javaClass.simpleName}: ${e.message}"
                   }
-                  emit("F2", "DENY", observed, detail)
-              }
-
-              private fun openDocumentPicker() {
-                  try {
-                      val picker = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
-                          addCategory(Intent.CATEGORY_OPENABLE)
-                          type = "*/*"
-                          addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                          putExtra(
-                              DocumentsContract.EXTRA_INITIAL_URI,
-                              Uri.parse("content://com.android.externalstorage.documents/document/primary%3ADownload")
-                          )
-                      }
-                      startActivityForResult(picker, requestOpen)
-                  } catch (e: Exception) {
-                      emit("F3", "ALLOW", "ERROR", "Picker launch failed: ${e.javaClass.simpleName}")
-                  }
-              }
-
-              @Deprecated("Used for reproducible system document picker test")
-              override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-                  super.onActivityResult(requestCode, resultCode, data)
-                  if (requestCode != requestOpen) return
-                  if (resultCode != RESULT_OK || data?.data == null) {
-                      emit("F3", "ALLOW", "ERROR", "User/document picker did not return a URI")
-                      return
-                  }
-                  var observed = "ERROR"
-                  var detail = ""
-                  try {
-                      val uri = data.data!!
-                      val content = contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
-                          ?: error("ContentResolver returned no stream")
-                      observed = if (content == "ASL_STAGE3_SAF_DOCUMENT") "ALLOW" else "INCORRECT_DATA"
-                      detail = "System picker provided URI; ContentResolver read selected document"
-                  } catch (e: Exception) {
-                      detail = "${e.javaClass.simpleName}: ${e.message}"
-                  }
-                  emit("F3", "ALLOW", observed, detail)
-              }
-
-              private fun emit(id: String, expected: String, observed: String, detail: String) {
                   val result = JSONObject()
-                      .put("id", id).put("expected", expected)
-                      .put("observed", observed).put("pass", observed == expected)
+                      .put("id", "K3")
+                      .put("expected", "DENY")
+                      .put("observed", observed)
+                      .put("pass", observed == "DENY")
                       .put("detail", detail)
-                  Log.i("SecurityLab", "ASL_STORAGE_RESULT:$result")
+                  Log.i("SecurityLab", "ASL_KEYSTORE_RESULT:$result")
                   setContentView(TextView(this).apply {
-                      text = "$id: $observed"
+                      text = "Keystore K3: $observed"
                       textSize = 23f
+                      setPadding(24, 42, 20, 20)
                   })
               }
           }
-          STAGE3_CLIENTSTORAGEPROBEACTIVITY_KT
-          write_managed "scripts/storage-tests.py" 'Managed by project-update.yml' <<'STAGE3_STORAGE_TESTS_PY'
-          # Managed by project-update.yml - Stage 3
-          """Validate F1-F3 using Android app observations; F3 uses the actual system picker."""
+          STAGE4_CLIENT_KT
+
+          write_managed "scripts/keystore-tests.py" 'Managed by project-update.yml' <<'STAGE4_KEYSTORE_PY'
+          # Managed by project-update.yml - Stage 4 Android Keystore
+          """K1-K3: app-observed Android Keystore experiments with an owner control."""
           import json
-          import re
           import subprocess
           import sys
           import time
-          import xml.etree.ElementTree as ET
           from pathlib import Path
 
-          PKG_OWNER = 'org.example.securitylab.owner'
-          PKG_CLIENT = 'org.example.securitylab.client'
-          MARKER = 'ASL_STORAGE_RESULT:'
-          DOCUMENT = 'ASL_STAGE3_DOCUMENT.txt'
-          CONTENT = 'ASL_STAGE3_SAF_DOCUMENT'
+          OWNER = 'org.example.securitylab.owner'
+          CLIENT = 'org.example.securitylab.client'
+          MARKER = 'ASL_KEYSTORE_RESULT:'
           API = subprocess.check_output(
               ['adb', 'shell', 'getprop', 'ro.build.version.sdk'], text=True
           ).strip()
           OUT = Path('results') / f'stage1-api-{API}'
-          OUT.mkdir(parents=True, exist_ok=True)
           REPORT = OUT / 'report.json'
           report = json.loads(REPORT.read_text(encoding='utf-8'))
           records = []
-          f3_trace = []
+          evidence = []
 
 
           def adb(*args, timeout=35):
               cmd = ['adb', *args]
-              response = subprocess.run(cmd, text=True, capture_output=True, timeout=timeout)
-              if response.returncode:
+              result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+              if result.returncode:
                   raise RuntimeError(
-                      f"{' '.join(cmd)}: {response.stderr.strip() or response.stdout.strip()}"
+                      f'{" ".join(cmd)}: {result.stderr.strip() or result.stdout.strip()}'
                   )
-              return response.stdout
+              return result.stdout
 
 
-          def note(message):
-              line = f'{time.strftime("%H:%M:%S")} {message}'
-              f3_trace.append(line)
-              print('F3:', line, flush=True)
+          def collect_record(test_id, seconds=20):
+              deadline = time.monotonic() + seconds
+              last = ''
+              while time.monotonic() < deadline:
+                  last = adb('logcat', '-d', '-v', 'raw', '-s', 'SecurityLab:I', '*:S')
+                  for line in reversed(last.splitlines()):
+                      if MARKER not in line:
+                          continue
+                      try:
+                          record = json.loads(line.split(MARKER, 1)[1])
+                      except json.JSONDecodeError:
+                          continue
+                      if record.get('id') == test_id:
+                          evidence.append(f'{test_id}\n{last}\n')
+                          return record
+                  time.sleep(0.5)
+              evidence.append(f'{test_id}: timeout\n{last}\n')
+              raise RuntimeError(f'No app-side result for {test_id}')
 
 
-          def read_record(case):
-              logs = adb('logcat', '-d', '-v', 'raw', '-s', 'SecurityLab:I', '*:S')
-              for line in reversed(logs.splitlines()):
-                  if MARKER not in line:
-                      continue
-                  try:
-                      record = json.loads(line.split(MARKER, 1)[1])
-                  except ValueError:
-                      continue
-                  if record.get('id') == case:
-                      return record
-              return None
-
-
-          def wait_record(case, seconds=20):
-              end = time.monotonic() + seconds
-              while time.monotonic() < end:
-                  record = read_record(case)
-                  if record is not None:
-                      return record
-                  time.sleep(0.6)
-              raise RuntimeError(f'No application-side result for {case}')
-
-
-          def launch(component, case=None):
-              adb('logcat', '-c')
-              command = ['shell', 'am', 'start', '-W', '-n', component]
-              if case:
-                  command += ['--es', 'experiment_id', case]
-              adb(*command)
-
-
-          def failed(case, expected, exc):
-              return {
-                  'id': case, 'expected': expected, 'observed': 'ERROR',
-                  'pass': False, 'detail': str(exc)[:450],
-              }
-
-
-          def simple(case, component, expected):
+          def run(test_id, package, expected):
               try:
-                  launch(component, case if case == 'F2' else None)
-                  record = wait_record(case)
+                  adb('shell', 'am', 'force-stop', package)
+                  adb('logcat', '-c')
+                  adb(
+                      'shell', 'am', 'start', '-W', '-n', f'{package}/.KeystoreProbeActivity',
+                      '--es', 'experiment_id', test_id
+                  )
+                  record = collect_record(test_id)
                   if record.get('expected') != expected or record.get('observed') != expected:
+                      record['pass'] = False
+                  if record.get('pass') is not True:
                       record['pass'] = False
                   return record
               except Exception as exc:
-                  return failed(case, expected, exc)
+                  return {
+                      'id': test_id,
+                      'expected': expected,
+                      'observed': 'ERROR',
+                      'pass': False,
+                      'detail': str(exc)[:450],
+                  }
 
 
-          def screenshot(name):
-              try:
-                  (OUT / name).write_bytes(
-                      subprocess.check_output(['adb', 'exec-out', 'screencap', '-p'], timeout=25)
-                  )
-              except Exception as exc:
-                  note(f'Could not save screenshot {name}: {exc}')
+          def print_record(record):
+              print(json.dumps(record, ensure_ascii=False), flush=True)
 
 
-          def hierarchy():
-              try:
-                  adb('shell', 'uiautomator', 'dump', '/sdcard/f3-window.xml', timeout=25)
-                  xml = adb('shell', 'cat', '/sdcard/f3-window.xml')
-                  (OUT / 'f3-ui.xml').write_text(xml, encoding='utf-8')
-                  return list(ET.fromstring(xml).iter('node'))
-              except Exception as exc:
-                  note(f'UI hierarchy unavailable: {exc}')
-                  return []
+          try:
+              k1 = run('K1', OWNER, 'ALLOW')
+              records.append(k1)
+              print_record(k1)
 
+              if k1['pass']:
+                  k2 = run('K2', OWNER, 'DENY')
+              else:
+                  k2 = {
+                      'id': 'K2', 'expected': 'DENY', 'observed': 'ERROR',
+                      'pass': False, 'detail': 'K1 positive control failed',
+                  }
+              records.append(k2)
+              print_record(k2)
 
-          def label(node):
-              return ' '.join((node.get('text', ''), node.get('content-desc', ''))).strip()
+              if k1['pass']:
+                  k3 = run('K3', CLIENT, 'DENY')
+                  control = run('K3_CONTROL', OWNER, 'ALLOW')
+                  evidence.append('K3_OWNER_CONTROL ' + json.dumps(control, ensure_ascii=False))
+                  if not control.get('pass'):
+                      k3['pass'] = False
+                      k3['detail'] = str(k3.get('detail', '')) + \
+                          '; owner alias positive control failed: ' + str(control.get('detail', ''))
+                  else:
+                      k3['detail'] = str(k3.get('detail', '')) + \
+                          '; owner alias remains accessible (positive control)'
+              else:
+                  k3 = {
+                      'id': 'K3', 'expected': 'DENY', 'observed': 'ERROR',
+                      'pass': False, 'detail': 'Owner alias not verified by K1',
+                  }
+              records.append(k3)
+              print_record(k3)
+          finally:
+              OUT.mkdir(parents=True, exist_ok=True)
+              (OUT / 'keystore-logcat.txt').write_text(
+                  '\n\n'.join(evidence) + '\n', encoding='utf-8'
+              )
 
-
-          def tap(node):
-              nums = [int(n) for n in re.findall(r'\d+', node.get('bounds', ''))]
-              if len(nums) != 4 or nums[2] <= nums[0] or nums[3] <= nums[1]:
-                  return False
-              adb('shell', 'input', 'tap', str((nums[0] + nums[2]) // 2),
-                  str((nums[1] + nums[3]) // 2))
-              return True
-
-
-          def choose(nodes, predicate):
-              matches = [n for n in nodes if predicate(label(n).casefold())]
-              matches.sort(key=lambda n: n.get('clickable') != 'true')
-              return matches[0] if matches else None
-
-
-          def exact_document_node(nodes):
-              """Select the document's filename, never a 'Preview the file ...' button.
-
-              DocumentsUI can expose both a preview action and the filename. A fuzzy
-              substring match accidentally clicks the preview, which opens Android's
-              'Open with Chrome / HTML Viewer' chooser instead of returning the URI.
-              """
-              matches = [
-                  n for n in nodes
-                  if n.get('text', '').strip() == DOCUMENT
-                  or n.get('content-desc', '').strip() == DOCUMENT
-              ]
-              # Prefer the visible filename text. Its center is inside the document row.
-              matches.sort(key=lambda n: n.get('text', '').strip() != DOCUMENT)
-              return matches[0] if matches else None
-
-
-          def save_diagnostics():
-              screenshot('f3-last-screen.png')
-              try:
-                  (OUT / 'f3-logcat.txt').write_text(
-                      adb('logcat', '-d', '-v', 'time', '-t', '1000'), encoding='utf-8'
-                  )
-                  (OUT / 'f3-activity.txt').write_text(
-                      adb('shell', 'dumpsys', 'activity', 'activities'), encoding='utf-8'
-                  )
-              except Exception as exc:
-                  note(f'Could not save all diagnostics: {exc}')
-              (OUT / 'f3-debug.log').write_text('\n'.join(f3_trace) + '\n', encoding='utf-8')
-
-
-          def picker():
-              case, expected = 'F3', 'ALLOW'
-              try:
-                  local = OUT / DOCUMENT
-                  local.write_text(CONTENT, encoding='utf-8')
-                  adb('shell', 'mkdir', '-p', '/sdcard/Download')
-                  adb('push', str(local), f'/sdcard/Download/{DOCUMENT}')
-                  actual = adb('shell', 'cat', f'/sdcard/Download/{DOCUMENT}').strip()
-                  if actual != CONTENT:
-                      raise RuntimeError('Test document was not created correctly in Download')
-                  note('Test document verified at /sdcard/Download')
-                  launch(PKG_CLIENT + '/.StorageProbeActivity', case)
-                  note('ACTION_OPEN_DOCUMENT launched by client activity')
-
-                  attempted = set()
-                  clicked_file = False
-                  file_clicks = 0
-                  last_file_click = 0.0
-                  unexpected_chooser_count = 0
-                  deadline = time.monotonic() + 75
-                  while time.monotonic() < deadline:
-                      result = read_record(case)
-                      if result is not None:
-                          if result.get('expected') != expected or result.get('observed') != expected:
-                              result['pass'] = False
-                          note('Received application-side F3 result')
-                          return result
-
-                      nodes = hierarchy()
-                      if not nodes:
-                          time.sleep(1)
-                          continue
-                      # Use the UI hierarchy rather than force-granting any URI.
-                      screen = ' | '.join(label(n) for n in nodes if label(n))
-                      fingerprint = screen[:1500]
-                      note('Picker items: ' + screen[:350])
-
-                      # 'Open with' is a viewer chooser, not an ACTION_OPEN_DOCUMENT result.
-                      # If it appears, the user-selection operation did not complete.
-                      if any(label(n).casefold() == 'open with' for n in nodes):
-                          screenshot('f3-unexpected-viewer.png')
-                          unexpected_chooser_count += 1
-                          note('Unexpected viewer chooser detected; returning to picker')
-                          if unexpected_chooser_count > 1:
-                              raise RuntimeError(
-                                  'Android opened a viewer chooser instead of returning '
-                                  'the selected document URI; inspect f3-unexpected-viewer.png '
-                                  'and f3-ui.xml'
-                              )
-                          adb('shell', 'input', 'keyevent', 'KEYCODE_BACK')
-                          last_file_click = 0.0
-                          clicked_file = False
-                          time.sleep(1)
-                          continue
-
-                      file_node = exact_document_node(nodes)
-                      now = time.monotonic()
-                      if file_node is not None and file_clicks < 2 and (
-                          not clicked_file or now - last_file_click > 12
-                      ):
-                          screenshot('f3-picker.png')
-                          if tap(file_node):
-                              clicked_file = True
-                              file_clicks += 1
-                              last_file_click = now
-                              note('Tapped exact filename node (excluded preview icon)')
-                              time.sleep(2)
-                              continue
-
-                      if clicked_file:
-                          # Some system pickers select a row first and then require Open.
-                          open_node = choose(nodes, lambda s: s in {
-                              'open', 'select', 'choose', 'открыть', 'выбрать'
-                          })
-                          if open_node is not None and ('confirm', fingerprint) not in attempted:
-                              attempted.add(('confirm', fingerprint))
-                              if tap(open_node):
-                                  note('Tapped picker confirmation')
-                                  time.sleep(2)
-                                  continue
-
-                      downloads = choose(nodes, lambda s: s in {
-                          'downloads', 'download', 'загрузки'
-                      })
-                      if downloads is not None and ('downloads', fingerprint) not in attempted:
-                          attempted.add(('downloads', fingerprint))
-                          if tap(downloads):
-                              note('Navigated to Downloads')
-                              time.sleep(1.5)
-                              continue
-
-                      roots = choose(nodes, lambda s: any(k in s for k in (
-                          'show roots', 'show navigation', 'open navigation',
-                          'navigation drawer', 'browse files', 'показать меню',
-                          'показать корни', 'обзор файлов'
-                      )))
-                      if roots is not None and ('roots', fingerprint) not in attempted:
-                          attempted.add(('roots', fingerprint))
-                          if tap(roots):
-                              note('Opened navigation menu')
-                              time.sleep(1.5)
-                              continue
-
-                      browse = choose(nodes, lambda s: s in {'browse', 'обзор'})
-                      if browse is not None and ('browse', fingerprint) not in attempted:
-                          attempted.add(('browse', fingerprint))
-                          if tap(browse):
-                              note('Opened Browse tab')
-                              time.sleep(1.5)
-                              continue
-
-                      search = choose(nodes, lambda s: s in {'search', 'поиск', 'search files'})
-                      if search is not None and ('search', fingerprint) not in attempted:
-                          attempted.add(('search', fingerprint))
-                          if tap(search):
-                              note('Searching via system picker UI')
-                              adb('shell', 'input', 'text', DOCUMENT)
-                              adb('shell', 'input', 'keyevent', '66')
-                              time.sleep(2)
-                              continue
-
-                      time.sleep(1)
-
-                  raise RuntimeError(
-                      'No application-side result for F3 after picker UI automation; '
-                      'inspect f3-ui.xml, f3-last-screen.png, f3-debug.log'
-                  )
-              except Exception as exc:
-                  note(f'F3 ERROR: {exc}')
-                  return failed(case, expected, exc)
-              finally:
-                  save_diagnostics()
-
-
-          for case, component, expected in (
-              ('F1', PKG_OWNER + '/.StorageProbeActivity', 'ALLOW'),
-          ):
-              result = simple(case, component, expected)
-              records.append(result)
-              print(json.dumps(result, ensure_ascii=False), flush=True)
-
-          if records[0].get('pass') is True:
-              f2 = simple('F2', PKG_CLIENT + '/.StorageProbeActivity', 'DENY')
-          else:
-              f2 = failed('F2', 'DENY', 'F1 positive control failed')
-          records.append(f2)
-          print(json.dumps(f2, ensure_ascii=False), flush=True)
-
-          f3 = picker()
-          records.append(f3)
-          print(json.dumps(f3, ensure_ascii=False), flush=True)
-
-          report['stage'] = 'sandbox_ipc_permissions_storage'
+          report['stage'] = 'sandbox_ipc_permissions_storage_keystore'
           report['results'].extend(records)
-          all_ids = {f'S{i}' for i in range(1, 6)} | {f'P{i}' for i in range(1, 4)} | {f'F{i}' for i in range(1, 4)}
-          found = {x.get('id') for x in report['results'] if isinstance(x, dict)}
-          report['status'] = ('PASS' if all_ids.issubset(found)
-                              and all(x.get('pass') is True for x in report['results'])
-                              else 'FAIL')
+          expected_ids = {
+              *(f'S{i}' for i in range(1, 6)),
+              *(f'P{i}' for i in range(1, 4)),
+              *(f'F{i}' for i in range(1, 4)),
+              *(f'K{i}' for i in range(1, 4)),
+          }
+          seen_ids = {x.get('id') for x in report['results'] if isinstance(x, dict)}
+          report['status'] = (
+              'PASS' if expected_ids.issubset(seen_ids)
+              and len(seen_ids & expected_ids) == len(expected_ids)
+              and all(x.get('pass') is True for x in report['results'])
+              else 'FAIL'
+          )
           REPORT.write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
-          print(json.dumps(report, ensure_ascii=False, indent=2))
+          print(json.dumps(report, ensure_ascii=False, indent=2), flush=True)
           if report['status'] != 'PASS':
-              sys.exit('Storage experiments failed. Inspect F3 artifacts and report.json')
-          STAGE3_STORAGE_TESTS_PY
-          write_managed "scripts/run-stage3.sh" 'Managed by project-update.yml' <<'STAGE3_RUN_STAGE3_SH'
+              sys.exit('Android Keystore experiment failed; inspect K1-K3 and keystore-logcat.txt')
+          STAGE4_KEYSTORE_PY
+
+          write_managed "scripts/run-stage4.sh" 'Managed by project-update.yml' <<'STAGE4_RUN_STAGE4_SH'
           #!/usr/bin/env bash
-          # Managed by project-update.yml - Stage 3
+          # Managed by project-update.yml - Stage 4
           set -euo pipefail
-          bash scripts/run-stage2.sh
-          python3 scripts/storage-tests.py
-          STAGE3_RUN_STAGE3_SH
-          write_managed "scripts/run-tests.sh" 'Managed by project-update.yml' <<'STAGE3_RUN_TESTS_SH'
+          bash scripts/run-stage3.sh
+          python3 scripts/keystore-tests.py
+          STAGE4_RUN_STAGE4_SH
+
+          write_managed "scripts/run-tests.sh" 'Managed by project-update.yml' <<'STAGE4_RUN_TESTS_SH'
           #!/usr/bin/env bash
           # Managed by project-update.yml - current full test suite
           set -euo pipefail
-          bash scripts/run-stage3.sh
-          STAGE3_RUN_TESTS_SH
-          write_managed "scripts/publish-results.py" 'Managed by project-update.yml' <<'STAGE3_PUBLISH_RESULTS_PY'
-          # Managed by project-update.yml - report generator shared across stages.
-          """Publish only observed CI results, preserving non-managed README sections."""
-          import json
-          import os
-          import shutil
-          from datetime import datetime, timezone
-          from pathlib import Path
+          bash scripts/run-stage4.sh
+          STAGE4_RUN_TESTS_SH
 
-          START = '<!-- ANDROID_STAGE1_START -->'
-          END = '<!-- ANDROID_STAGE1_END -->'
-          README = Path('README.md')
-          CATALOG = json.loads(Path('experiments/catalog.json').read_text(encoding='utf-8'))
-          TESTS = CATALOG['experiments']
-          IMAGES = Path('docs/screenshots')
-          IMAGES.mkdir(parents=True, exist_ok=True)
-          RESULTS = Path('results')
-          RESULTS.mkdir(parents=True, exist_ok=True)
-          reports = {}
-          screenshots = {}
+          write_managed "experiments/keystore.md" 'Managed by project-update.yml' <<'STAGE4_DOC_MD'
+          <!-- Managed by project-update.yml - Stage 4 Android Keystore -->
+          # Android Keystore: методика K1–K3
 
-          for api, version in ((33, '13'), (36, '16')):
-              folder = Path('downloaded') / f'securitylab-api-{api}'
-              try:
-                  data = json.loads((folder / 'report.json').read_text(encoding='utf-8'))
-                  if not isinstance(data, dict) or int(data.get('api', -1)) != api:
-                      raise ValueError('Wrong or absent API level in report')
-                  reports[api] = data
-                  (RESULTS / f'latest-api-{api}.json').write_text(
-                      json.dumps(data, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
-              except (ValueError, OSError, TypeError):
-                  reports[api] = None
-                  (RESULTS / f'latest-api-{api}.json').unlink(missing_ok=True)
+          Объект: два разных приложения (`SecurityOwner` и `SecurityClient`) с различными UID в Android Emulator API 33 и API 36. Во всех испытаниях `targetSdk = 33`.
 
-              for kind in ('owner', 'client', 'f3-picker'):
-                  filename = f'{kind}.png'
-                  source = folder / filename
-                  target = IMAGES / f'stage3-api-{api}-{kind}.png'
-                  if reports[api] is not None and source.is_file() and source.read_bytes().startswith(b'\x89PNG\r\n\x1a\n'):
-                      shutil.copyfile(source, target)
-                      screenshots[(api, kind)] = f'<img src="{target.as_posix()}" width="220" alt="{kind}, Android {version}">'
-                  else:
-                      target.unlink(missing_ok=True)
-                      screenshots[(api, kind)] = 'Нет скриншота текущего запуска'
-
-
-          def row_for(api, test_id):
-              data = reports[api]
-              if not data:
-                  return ('НЕТ ОТЧЁТА', 'Эксперимент не выполнялся или отсутствует отчёт')
-              match = next((x for x in data.get('results', [])
-                            if isinstance(x, dict) and x.get('id') == test_id), None)
-              if not match:
-                  return ('НЕ ВЫПОЛНЕН', 'Нет записи об эксперименте')
-              observed = str(match.get('observed', '?')).replace('|', '/').replace('\n', ' ').replace('\r', ' ')
-              detail = str(match.get('detail', '')).replace('|', '/').replace('\n', ' ').replace('\r', ' ')
-              status = 'PASS' if match.get('pass') is True else ('ERROR' if observed == 'ERROR' else 'FAIL')
-              return (f'{status} ({observed})', detail[:240])
-
-
-          def total(api):
-              data = reports[api]
-              if not data:
-                  return 'NO REPORT'
-              ids = {x.get('id') for x in data.get('results', []) if isinstance(x, dict)}
-              expected = {x['id'] for x in TESTS}
-              if not expected.issubset(ids):
-                  return 'INCOMPLETE'
-              return 'PASS' if all(row_for(api, x['id'])[0].startswith('PASS') for x in TESTS) else 'FAIL'
-
-
-          url = f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{os.environ['GITHUB_RUN_ID']}"
-          when = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
-          lines = [
-              START,
-              '## Экспериментальные результаты Android Security Lab',
-              '',
-              f'Обновлено: **{when}**. [Запуск GitHub Actions]({url}).',
-              '',
-              '| Проверка | Android 13 (API 33) | Android 16 (API 36) |',
-              '|---|---|---|',
-          ]
-          for test in TESTS:
-              tid = test['id']
-              lines.append(f"| **{tid}** — {test['title']} | {row_for(33, tid)[0]} | {row_for(36, tid)[0]} |")
-          lines.extend([
-              '',
-              f'**Сводный статус:** Android 13 — {total(33)}; Android 16 — {total(36)}.',
-              '',
-              '### Наблюдения и интерпретация',
-              '',
-              '| Сценарий | Android 13: наблюдение | Android 16: наблюдение |',
-              '|---|---|---|',
-          ])
-          for test in TESTS:
-              tid = test['id']
-              lines.append(f"| {tid} | {row_for(33, tid)[1]} | {row_for(36, tid)[1]} |")
-          lines.extend([
-              '',
-              '### Скриншоты из Android Emulator',
-              '',
-              '| Материал | Android 13 | Android 16 |',
-              '|---|---|---|',
-          ])
-          for kind, label in (('owner', 'SecurityOwner'), ('client', 'SecurityClient'), ('f3-picker', 'Системный выбор документа F3')):
-              lines.append(f"| {label} | {screenshots[(33, kind)]} | {screenshots[(36, kind)]} |")
-          lines.extend([
-              '',
-              '> PASS означает совпадение наблюдаемого поведения с гипотезой, в том числе при отказе в доступе. ',
-              '> Инфраструктурная ошибка не считается подтверждением механизма безопасности. ',
-              '> Тесты выполняются в эмуляторах, без выводов об аппаратной защите физического смартфона.',
-              '',
-              'Подробные машинно-читаемые данные находятся в [`results/`](results/), а журналы и дополнительные файлы — в Artifacts запуска.',
-              '',
-              END,
-          ])
-          block = '\n'.join(lines)
-          original = README.read_text(encoding='utf-8') if README.is_file() else '# Android Security Lab\n'
-          if START in original and END in original:
-              before, remainder = original.split(START, 1)
-              _, after = remainder.split(END, 1)
-              updated = before.rstrip() + '\n\n' + block + after
-          elif START not in original and END not in original:
-              updated = original.rstrip() + '\n\n' + block + '\n'
-          else:
-              raise SystemExit('README has one missing management marker; no replacement performed')
-          README.write_text(updated.rstrip() + '\n', encoding='utf-8')
-          (RESULTS / 'summary.json').write_text(json.dumps({
-              'generated_at_utc': when,
-              'workflow_run_url': url,
-              'expected_scenarios': [x['id'] for x in TESTS],
-              'api_33': total(33),
-              'api_36': total(36),
-          }, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
-          print('Published', len(TESTS), 'unique scenarios: Android 13', total(33), '/ Android 16', total(36))
-          STAGE3_PUBLISH_RESULTS_PY
-          write_managed "experiments/catalog.json" '"managed_by": "project-update.yml"' <<'STAGE3_CATALOG_JSON'
-          {
-            "managed_by": "project-update.yml",
-            "experiments": [
-              {"id": "S1", "title": "Владелец читает собственный приватный файл"},
-              {"id": "S2", "title": "Другой UID не читает приватный файл"},
-              {"id": "S3", "title": "Закрытый ContentProvider отклоняет запрос"},
-              {"id": "S4", "title": "Открытый ContentProvider предоставляет данные"},
-              {"id": "S5", "title": "ContentProvider защищён разрешением"},
-              {"id": "P1", "title": "CAMERA: разрешение отсутствует"},
-              {"id": "P2", "title": "CAMERA: разрешение выдано"},
-              {"id": "P3", "title": "CAMERA: разрешение отозвано"},
-              {"id": "F1", "title": "Владелец читает свой app-specific внешний файл"},
-              {"id": "F2", "title": "Другому приложению запрещён прямой доступ к app-specific файлу"},
-              {"id": "F3", "title": "Доступ к документу через системный выбор файла"}
-            ]
-          }
-          STAGE3_CATALOG_JSON
-          write_managed "experiments/storage.md" 'Managed by project-update.yml' <<'STAGE3_STORAGE_MD'
-          <!-- Managed by project-update.yml - Stage 3 -->
-          # Scoped Storage: методика F1–F3
-
-          Исследуются ограничения доступа к файлам на Android 13 и Android 16 при фиксированном `targetSdk=33`.
-
-          | ID | Действие | Ожидается |
+          | ID | Метод | Ожидаемое наблюдение |
           |---|---|---|
-          | F1 | Owner создаёт и читает тестовый файл в `getExternalFilesDir(null)` | ALLOW |
-          | F2 | Client напрямую читает этот файл по пути `/storage/emulated/0/Android/data/<owner>/files/...` | DENY |
-          | F3 | Client вызывает `ACTION_OPEN_DOCUMENT`, выбирает синтетический документ в системном интерфейсе, затем читает выданный URI | ALLOW |
+          | K1 | Owner создаёт ключ AES-256 через `AndroidKeyStore` и выполняет AES/GCM/NoPadding encrypt/decrypt | ALLOW: восстановлен исходный текст |
+          | K2 | Owner вызывает `SecretKey.getEncoded()` для ключа K1 | DENY: API возвращает `null`, байты ключа не выдаются |
+          | K3 | Client с другим UID ищет алиас ключа Owner в собственном `AndroidKeyStore` | DENY: алиас отсутствует, `getKey` возвращает `null` |
 
-          F1 является положительным контролем для F2: при его провале отрицательный тест не считается подтверждённым. Содержание файлов синтетическое, персональные данные не используются.
+          Для K3 дополнительно повторно проверяется наличие исходного ключа в Owner: это положительный контроль, исключающий ложноуспешный запрет из-за удаления ключа.
 
-          F3 действительно использует системный документный интерфейс Android, а не напрямую предоставленный из ADB URI. ADB используется только для подготовки тестового файла в папке Download и автоматизации нажатия на элемент интерфейса. Ошибка UI-автоматизации фиксируется как ERROR/FAIL, не как ошибка безопасности Android.
+          Результат собирается из Logcat самого Android-приложения с меткой `ASL_KEYSTORE_RESULT`, а не по выводу внешней утилиты. Исключения и отсутствие ответа фиксируются как `ERROR` и никогда не считаются подтверждением защиты.
 
-          На эмуляторах не проверяется защита физической флеш-памяти и аппаратные механизмы.
+          K2 проверяет невозможность извлечь байты через стандартный JCA API, а не математическую неуязвимость ключа ко всем атакам. `KeyInfo.securityLevel`, когда доступен, сохраняется как диагностический признак. Результаты Android Emulator не являются подтверждением аппаратной защиты TEE/StrongBox.
 
-          Документация: https://developer.android.com/about/versions/11/privacy/storage ; https://developer.android.com/training/data-storage/shared/documents-files
-          STAGE3_STORAGE_MD
-          python3 - <<'PY_MANIFEST'
+          Источники: https://developer.android.com/privacy-and-security/keystore ; https://developer.android.com/reference/android/security/keystore/KeyGenParameterSpec ; https://developer.android.com/reference/android/security/keystore/KeyInfo
+          STAGE4_DOC_MD
+
+          python3 - <<'STAGE4_CATALOG_PY'
+          import json
           from pathlib import Path
+          p = Path('experiments/catalog.json')
+          doc = json.loads(p.read_text(encoding='utf-8'))
+          if doc.get('managed_by') != 'project-update.yml':
+              raise SystemExit('Refusing to edit unrecognized experiments/catalog.json')
+          entries = doc.get('experiments')
+          if not isinstance(entries, list):
+              raise SystemExit('Malformed experiment catalog')
+          current = {x.get('id') for x in entries}
+          original = {f'S{i}' for i in range(1, 6)} | {f'P{i}' for i in range(1, 4)} | {f'F{i}' for i in range(1, 4)}
+          if not original.issubset(current):
+              raise SystemExit(f'Stage 3 catalog incomplete: {sorted(original - current)}')
+          for test in (
+              {'id': 'K1', 'title': 'Android Keystore: шифрование и расшифрование AES-GCM'},
+              {'id': 'K2', 'title': 'Android Keystore: отказ в экспорте байтов секретного ключа'},
+              {'id': 'K3', 'title': 'Android Keystore: изоляция ключа между приложениями'},
+          ):
+              if test['id'] not in current:
+                  entries.append(test)
+          if len({x['id'] for x in entries}) != len(entries):
+              raise SystemExit('Duplicate experiment IDs detected')
+          new = json.dumps(doc, ensure_ascii=False, indent=2) + '\n'
+          if p.read_text(encoding='utf-8') != new:
+              p.write_text(new, encoding='utf-8')
+              print('Updated:', p)
+          else:
+              print('Unchanged:', p)
+          STAGE4_CATALOG_PY
 
-          for module in ('owner', 'client'):
-              path = Path(module) / 'src/main/AndroidManifest.xml'
-              xml = path.read_text(encoding='utf-8')
-              name = '.StorageProbeActivity'
-              if f'android:name="{name}"' in xml:
-                  print(f'Already declared: {module} StorageProbeActivity')
-                  continue
-              closing = '</application>'
-              if xml.count(closing) != 1:
-                  raise SystemExit(f'Unexpected manifest structure: {path}')
-              xml = xml.replace(
-                  closing,
-                  '        <activity android:name=".StorageProbeActivity" android:exported="true" />\n    ' + closing,
-                  1,
-              )
-              path.write_text(xml, encoding='utf-8')
-              print(f'Updated manifest: {path}')
-          PY_MANIFEST
-
-          # Required files must exist and contain substantive source.
-          for file in \
-            scripts/storage-tests.py \
-            scripts/run-stage3.sh \
-            scripts/run-tests.sh \
-            scripts/publish-results.py \
-            experiments/catalog.json \
-            experiments/storage.md \
-            owner/src/main/java/org/example/securitylab/owner/StorageProbeActivity.kt \
-            client/src/main/java/org/example/securitylab/client/StorageProbeActivity.kt; do
-            if [ ! -s "$file" ]; then
-              echo "Stage 3 generator did not create: $file" >&2
-              exit 1
-            fi
-          done
-          echo 'All eight generated files are present.'
-
-          python3 -m py_compile scripts/storage-tests.py scripts/publish-results.py
-          bash -n scripts/run-stage3.sh scripts/run-tests.sh
-          python3 -m json.tool experiments/catalog.json >/dev/null
-          python3 - <<'PY_XML'
+          python3 - <<'STAGE4_MANIFEST_PY'
           from pathlib import Path
           from xml.etree import ElementTree as ET
-          for module in ('owner','client'):
-              path = Path(module)/'src/main/AndroidManifest.xml'
-              tree=ET.parse(path)
-              namespace='{http://schemas.android.com/apk/res/android}'
-              activities=[a.get(namespace+'name') for a in tree.iter('activity')]
-              assert '.StorageProbeActivity' in activities, (module,activities)
-              print('Manifest OK:', path)
-          PY_XML
+          for module in ('owner', 'client'):
+              p = Path(module) / 'src/main/AndroidManifest.xml'
+              xml = p.read_text(encoding='utf-8')
+              activity = '.KeystoreProbeActivity'
+              if f'android:name="{activity}"' not in xml:
+                  if xml.count('</application>') != 1:
+                      raise SystemExit(f'Unexpected XML structure in {p}')
+                  xml = xml.replace(
+                      '</application>',
+                      '        <activity android:name=".KeystoreProbeActivity" android:exported="true" />\n    </application>',
+                      1,
+                  )
+                  p.write_text(xml, encoding='utf-8')
+                  print('Updated:', p)
+              ET.parse(p)
+              root = ET.parse(p).getroot()
+              ns = '{http://schemas.android.com/apk/res/android}'
+              found = [x for x in root.iter('activity') if x.get(ns + 'name') == activity]
+              if len(found) != 1:
+                  raise SystemExit(f'KeystoreProbeActivity declaration invalid in {p}')
+              print('Manifest OK:', p)
+          STAGE4_MANIFEST_PY
 
-      - name: Commit only ordinary source and documentation files
+          python3 -m py_compile scripts/keystore-tests.py scripts/storage-tests.py scripts/publish-results.py
+          bash -n scripts/run-tests.sh scripts/run-stage4.sh scripts/run-stage3.sh
+          python3 - <<'STAGE4_VERIFY_PY'
+          import json
+          from pathlib import Path
+          required = [
+              'owner/src/main/java/org/example/securitylab/owner/KeystoreProbeActivity.kt',
+              'client/src/main/java/org/example/securitylab/client/KeystoreProbeActivity.kt',
+              'scripts/keystore-tests.py', 'scripts/run-stage4.sh',
+              'scripts/run-tests.sh', 'experiments/keystore.md',
+          ]
+          for filename in required:
+              if not Path(filename).is_file() or Path(filename).stat().st_size < 60:
+                  raise SystemExit(f'Missing or truncated Stage 4 file: {filename}')
+          with open('experiments/catalog.json', encoding='utf-8') as source:
+              catalog = json.load(source)
+          ids = [item['id'] for item in catalog['experiments']]
+          expected = [*(f'S{i}' for i in range(1, 6)), *(f'P{i}' for i in range(1, 4)),
+                      *(f'F{i}' for i in range(1, 4)), *(f'K{i}' for i in range(1, 4))]
+          if ids != expected:
+              raise SystemExit(f'Unexpected catalog entries: {ids}')
+          if 'bash scripts/run-stage4.sh' not in Path('scripts/run-tests.sh').read_text():
+              raise SystemExit('run-tests.sh is not connected to Stage 4')
+          print('Stage 4 generator: all 14 scenario IDs present and source files validated.')
+          STAGE4_VERIFY_PY
+
+      - name: Commit Stage 4 source, scripts and documentation
         shell: bash
         run: |
           set -euo pipefail
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -- owner/src/main/AndroidManifest.xml client/src/main/AndroidManifest.xml
-          git add -- owner/src/main/java/org/example/securitylab/owner/StorageProbeActivity.kt
-          git add -- client/src/main/java/org/example/securitylab/client/StorageProbeActivity.kt
-          git add -- scripts/storage-tests.py scripts/run-stage3.sh scripts/run-tests.sh scripts/publish-results.py
-          git add -- experiments/catalog.json experiments/storage.md
+          git add -- owner/src/main/java/org/example/securitylab/owner/KeystoreProbeActivity.kt
+          git add -- client/src/main/java/org/example/securitylab/client/KeystoreProbeActivity.kt
+          git add -- scripts/keystore-tests.py scripts/run-stage4.sh scripts/run-tests.sh
+          git add -- experiments/catalog.json experiments/keystore.md
           if git diff --cached --quiet; then
-            echo 'Stage 3 files already current.'
+            echo "Stage 4 is already up to date."
           else
-            git commit -m 'feat: add Scoped Storage scenarios F1-F3 [skip ci]'
+            git commit -m "feat: Android Keystore experiments K1-K3 [skip ci]"
             git push origin "HEAD:${{ github.event.repository.default_branch }}"
           fi
 
-      - name: Verify new files are committed
+      - name: Verify Stage 4 commit
         shell: bash
         run: |
           set -euo pipefail
           for path in \
-            scripts/storage-tests.py \
-            scripts/run-stage3.sh \
+            scripts/keystore-tests.py \
+            scripts/run-stage4.sh \
             scripts/run-tests.sh \
-            scripts/publish-results.py \
             experiments/catalog.json \
-            experiments/storage.md; do
-            if ! git cat-file -e "HEAD:$path"; then
-              echo "Not committed: $path" >&2
-              exit 1
-            fi
+            experiments/keystore.md; do
+            git cat-file -e "HEAD:$path" || { echo "Not committed: $path" >&2; exit 1; }
           done
-          echo 'Stage 3 files are committed in the current HEAD.'
+          echo "Stage 4 commit verified: all required files exist in HEAD."
