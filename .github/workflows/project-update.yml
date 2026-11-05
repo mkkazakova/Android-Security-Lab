@@ -417,7 +417,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 -m py_compile scripts/publish-results.py
+          python3 -c "from pathlib import Path; compile(Path('scripts/publish-results.py').read_text(encoding='utf-8'), 'scripts/publish-results.py', 'exec')"
           python3 - <<'ASL_FINAL_CHECK_PY'
           import json
           from pathlib import Path
